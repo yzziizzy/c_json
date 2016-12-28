@@ -4,10 +4,12 @@
 
 
 struct json_obj;
+struct json_array;
 
 
 enum json_type {
-	JSON_TYPE_NULL = 0,
+	JSON_TYPE_UNDEFINED = 0,
+	JSON_TYPE_NULL,
 	JSON_TYPE_INT,
 	JSON_TYPE_DOUBLE,
 	JSON_TYPE_STRING,
@@ -24,6 +26,7 @@ struct json_value{
 		double dbl;
 		char* str;
 		struct json_obj* obj;
+		struct json_array* arr;
 	} v;
 	union {
 		int len;
@@ -34,7 +37,7 @@ struct json_value{
 struct json_obj_field {
 	uint64_t hash;
 	char* key;
-	struct json_value value;
+	struct json_value* value;
 };
 
 
@@ -47,7 +50,7 @@ struct json_obj {
 
 struct json_array_node {
 	struct json_array_node* next;
-	struct json_value value;
+	struct json_value* value;
 };
 
 struct json_array {

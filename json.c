@@ -77,21 +77,27 @@ int decode_c_escape_str(char* in, char* out, size_t len) {
 				case '\'': *out = '\''; break; 
 				case '"': *out = '"'; break; 
 				case '`': *out = '`'; break; 
+				case '?': *out = '?'; break; 
 				case '0': *out = '\0'; break; 
 				case 'r': *out = '\r'; break; 
 				case 'n': *out = '\n'; break;
 				case 'f': *out = '\f'; break;
+				case 'a': *out = '\a'; break;
+				case 'b': *out = '\b'; break;
 				case 'v': *out = '\v'; break;
 				case 't': *out = '\t'; break;
 				case 'x': 
 					// TODO: parse hex code
 					*out = '?';
 					break;
+				case 'U':
+					// TODO parse longer unicode
 				case 'u': 
 					// TODO: parse unicode
 					*out = '?';
 					break;
-				
+				// TODO: parse octal
+					
 				default:
 					return 1;
 			}
@@ -360,6 +366,8 @@ int lex_label_token(struct json_lexer* jl) {
 	return 0;
 }
 
+
+
 int lex_comment_token(struct json_lexer* jl) {
 	char* start, *se, *str;
 	char delim;
@@ -542,6 +550,211 @@ struct json_lexer* tokenize_string(char* source, size_t len) {
 }
 
 
+struct json_parser {
+	struct token* token_stream;
+	struct token* cur_token;
+	struct token* last_token;
+	int ts_len;
+	
+	struct json_value** stack;
+	int stack_cnt;
+	int stack_alloc;
+	
+	int error;
+};
+
+
+// sentinels for the parser stack
+
+// the slot above contains an array, merge into it
+struct json_value* RESUME_ARRAY = (struct json_value*)&RESUME_ARRAY;
+
+// the slot above contains a label, the slot above that contains the object to merge into
+struct json_value* RESUME_OBJ = (struct json_value*)&RESUME_OBJ;
+
+
+
+void parser_push(struct json_parser* jp, struct json_value* v) {
+	void* tmp;
+	
+	int alloc = jp->stack_alloc;
+	int cnt = jp->stack_cnt;
+	
+	// check size
+	if(cnt >= alloc) {
+		if(alloc == 0) alloc = 16;
+		alloc *= 2;
+		tmp = realloc(jp->stack, alloc * sizeof(*(jp->stack)));
+		if(!tmp) {
+			jp->error = 1;
+			return;
+		}
+		
+		jp->stack = tmp;
+		jp->stack_alloc = alloc;
+	}
+	
+	jp->stack[cnt] = v;
+	jp->stack_cnt++;
+}
+
+struct json_value* parser_pop(struct json_parser* jp) {
+	
+	if(jp->stack_cnt <= 0) {
+		jp->error = 2;
+		return NULL;
+	}
+	
+	return jp->stack[--jp->stack_cnt];
+}
+
+void parser_push_new_array(struct json_parser* jp) {
+	
+	struct json_value* val;
+	struct json_array* arr;
+	
+	val = malloc(sizeof(*val));
+	if(!val) {
+		jp->error = 5;
+		return;
+	}
+	
+	arr = malloc(sizeof(*arr));
+	if(!arr) {
+		jp->error = 5;
+		return;
+	}
+	
+	arr->head = NULL;
+	arr->tail = NULL;
+	arr->length = 0;
+	
+	val->type = JSON_TYPE_ARRAY;
+	val->v.arr = arr;
+	
+	parser_push(jp, val);
+}
+
+// push items into the array on the top of the stack
+void parser_push_array(struct json_parser* jp, struct json_value* val) {
+	
+	// append to the array;
+	
+}
+
+struct token* consume_token(struct json_parser* jp) {
+	if(jp->cur_token > jp->last_token) {
+		jp->error = 3;
+		return NULL;
+	}
+	
+	return ++jp->cur_token;
+}
+
+void consume_comments(struct json_parser* jp) {
+	while(1) {
+		if(jp->cur_token->tokenType != TOKEN_COMMENT) break;
+		
+		parser_push(jp, jp->cur_token->val);
+		consume_token(jp);
+	}
+}
+
+// compact the stack
+void reduce_array(struct json_parser* jp) {
+	
+	
+}
+
+struct json_value* parse_token_stream(struct json_lexer* jl) {
+	
+	int i;
+	struct json_parser* jp;
+	struct token* tok;
+	
+	jp = malloc(sizeof(*jp));
+	if(!jp) {
+		return NULL;
+	}
+	
+	tok = jl->token_stream;
+	jp->token_stream = jl->token_stream;
+	jp->cur_token = jl->token_stream;
+	jp->last_token = jl->token_stream + jl->ts_cnt;
+
+	i = 0;
+
+#define next() if(!(tok = consume_token(jp))) goto UNEXPECTED_EOI;
+
+	consume_comments(jp);
+
+	PARSE_ARRAY:
+
+		consume_comments(jp); // BUG need macro here to advance tok if it changed
+		
+		// cycle: val, comma
+		switch(tok->tokenType) {
+		
+			case TOKEN_ARRAY_START:
+				parser_push_val(jp, RESUME_ARRAY);
+				parser_push_new_array(jp);
+				goto PARSE_ARRAY;
+				
+			case TOKEN_ARRAY_END:
+				// pop from the stack until array start token found
+			
+			case TOKEN_OBJ_START:
+				parser_push_val(jp, RESUME_ARRAY);
+				parser_push_new_array(jp);
+				goto PARSE_OBJ;
+				
+			case TOKEN_STRING:
+			case TOKEN_NUMBER:
+			case TOKEN_NULL:
+			case TOKEN_UNDEFINED:
+				parser_push_val(jp, tok->val);
+				next();
+				reduce_array(jp);
+				
+				goto PARSE_ARRAY;
+		
+			case TOKEN_OBJ_END:
+				goto BRACKET_MISMATCH;
+			
+			case TOKEN_NONE:
+			case TOKEN_LABEL:
+			case TOKEN_COMMA:
+			case TOKEN_COLON:
+			default:
+				// invalid
+				goto UNEXPECTED_TOKEN;
+		}
+	
+	
+PARSE_OBJ:
+	for(; i < jl->ts_cnt; i++, tok++) {
+		// cycle: label, colon, value
+		if(tok[0].tokenType != TOKEN_LABEL) {
+			// parse error
+		}
+		if(tok[1].tokenType != TOKEN_COLON) {
+			// parse error
+		}
+		
+		
+	
+	}
+
+	return NULL;
+END:
+	return NULL;
+UNEXPECTED_EOI: // end of input
+	return NULL;
+UNEXPECTED_TOKEN:
+	return NULL;
+BRACKET_MISMATCH:
+	return NULL;
+}
 
 int main(int argc, char* argv[]) {
 	FILE* f;
