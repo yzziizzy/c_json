@@ -87,7 +87,7 @@ struct json_obj* json_create_obj(int allocPOT) {
 	
 	obj->fill = 0;
 	obj->allocSize = 1 << pot;
-	obj->buckets = malloc(sizeof(*obj->buckets) * obj->allocSize);
+	obj->buckets = calloc(1, sizeof(*obj->buckets) * obj->allocSize);
 	if(!obj->buckets) {
 		free(obj);
 		return NULL;
@@ -138,6 +138,34 @@ static size_t find_bucket(struct json_obj* obj, uint64_t hash, char* key) {
 	
 	// should never reach here if the table is maintained properly
 	return -1;
+}
+
+
+int json_obj_grow(struct json_obj* obj, int newSize) {
+	struct json_obj_field* old, *op;
+	size_t oldlen = obj->allocSize;
+	size_t i, n, bi;
+	
+	old = op = obj->buckets;
+	
+	obj->allocSize = newSize;
+	obj->buckets = calloc(1, sizeof(*obj->buckets) * newSize);
+	if(!obj->buckets) return 1;
+	
+	for(i = 0, n = 0; i < oldlen && n < obj->fill; i++) {
+		if(op->key == NULL) continue;
+		
+		bi = find_bucket(obj, op->hash, op->key);
+		obj->buckets[bi].value = op->value;
+		obj->buckets[bi].hash = op->hash;
+		obj->buckets[bi].key = op->key;
+		
+		n++;
+	}
+	
+	free(old);
+	
+	return 0;
 }
 
 // TODO: better return values and missing key handling
@@ -848,6 +876,7 @@ void reduce_array(struct json_parser* jp) {
 	struct json_value* arr = st[-1];
 	
 	// append v to arr
+	json_array_push_tail(arr->v.arr, v);
 	
 	jp->stack_cnt--;
 }
@@ -871,6 +900,8 @@ void reduce_object(struct json_parser* jp) {
 	struct json_value* obj = st[-2];
 	
 	// insert l:v into obj
+	json_obj_set_key(obj, l->v.str, v);
+	// BUG? free label value?
 	
 	jp->stack_cnt -= 2;
 }
@@ -905,7 +936,7 @@ struct json_value* parse_token_stream(struct json_lexer* jl) {
 		switch(tok->tokenType) {
 		
 			case TOKEN_ARRAY_START:
-				parser_push_val(jp, RESUME_ARRAY);
+				parser_push(jp, RESUME_ARRAY);
 				parser_push_new_array(jp);
 				goto PARSE_ARRAY;
 				
@@ -915,7 +946,7 @@ struct json_value* parse_token_stream(struct json_lexer* jl) {
 				break;
 			
 			case TOKEN_OBJ_START:
-				parser_push_val(jp, RESUME_OBJ);
+				parser_push(jp, RESUME_OBJ);
 				parser_push_new_array(jp);
 				goto PARSE_OBJ;
 				
@@ -923,7 +954,7 @@ struct json_value* parse_token_stream(struct json_lexer* jl) {
 			case TOKEN_NUMBER:
 			case TOKEN_NULL:
 			case TOKEN_UNDEFINED:
-				parser_push_val(jp, tok->val);
+				parser_push(jp, tok->val);
 				reduce_array(jp);
 				
 				next();
@@ -953,7 +984,7 @@ struct json_value* parse_token_stream(struct json_lexer* jl) {
 		else if(tok->tokenType != TOKEN_LABEL) {
 			// error
 		}
-		parser_push_val(jp, tok->val);
+		parser_push(jp, tok->val);
 		next();
 		
 		if(tok->tokenType != TOKEN_COLON) {
@@ -965,7 +996,7 @@ struct json_value* parse_token_stream(struct json_lexer* jl) {
 		switch(tok->tokenType) {
 		
 			case TOKEN_ARRAY_START:
-				parser_push_val(jp, RESUME_ARRAY);
+				parser_push(jp, RESUME_ARRAY);
 				parser_push_new_array(jp);
 				goto PARSE_ARRAY;
 				
@@ -975,7 +1006,7 @@ struct json_value* parse_token_stream(struct json_lexer* jl) {
 				break;
 			
 			case TOKEN_OBJ_START:
-				parser_push_val(jp, RESUME_OBJ);
+				parser_push(jp, RESUME_OBJ);
 				parser_push_new_array(jp);
 				goto PARSE_OBJ;
 				
@@ -983,7 +1014,7 @@ struct json_value* parse_token_stream(struct json_lexer* jl) {
 			case TOKEN_NUMBER:
 			case TOKEN_NULL:
 			case TOKEN_UNDEFINED:
-				parser_push_val(jp, tok->val);
+				parser_push(jp, tok->val);
 				reduce_array(jp);
 				
 				next();
