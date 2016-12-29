@@ -3,6 +3,9 @@
 #define dbg_printf printf
 
 
+#define JSON_DISCARD_COMMENTS
+
+
 struct json_obj;
 struct json_array;
 
@@ -42,10 +45,12 @@ struct json_obj_field {
 
 
 struct json_obj {
-	int allocSize;
-	int fill;
+	size_t allocSize;
+	size_t fill;
 	struct json_obj_field* buckets; 
 };
+
+
 
 
 struct json_array_node {

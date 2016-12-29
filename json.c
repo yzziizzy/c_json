@@ -6,6 +6,173 @@
 
 #include "json.h"
 
+#define MURMUR_SEED 718281828
+
+struct json_array* json_create_array() {
+
+	struct json_array* arr;
+	
+	arr = malloc(sizeof(*arr));
+	if(!arr) return NULL;
+	
+	arr->length = 0;
+	arr->head = NULL;
+	arr->tail = NULL;
+	
+	return arr;
+}
+
+
+// pushes the tail
+int json_array_push_tail(struct json_array* arr, struct json_value* val) {
+
+	struct json_array_node* node;
+	
+	node = malloc(sizeof(*node));
+	if(!node) return 1;
+	
+	node->next = NULL;
+	node->value = val;
+	
+	arr->length++;
+	
+	if(arr->length == 0) {
+		arr->tail = node;
+		arr->head = node;
+	}
+	else {
+		arr->tail->next = node;
+		arr->tail = node;
+	}
+	
+	return 0;
+}
+
+// pops the tail
+int json_array_pop_tail(struct json_array* arr, struct json_value** val) {
+
+	struct json_array_node* t;
+	
+	if(arr->length == 0) {
+		return 1;
+	}
+	
+	arr->length--;
+	
+	*val = arr->tail->value;
+	
+	// TODO BUG: deal with length == 1 
+	
+	// get the second to last node
+	t = arr->head;
+	while(t->next && t->next != arr->tail) t = t->next;
+	
+	free(arr->tail);
+	
+	t->next = NULL;
+	arr->tail = t;
+	
+	return 0;
+}
+
+struct json_obj* json_create_obj(int allocPOT) {
+	
+	int pot, allocSz;
+	struct json_obj* obj;
+	
+	pot = allocPOT < 4 ? 4 : allocPOT;
+	
+	obj = malloc(sizeof(*obj));
+	if(!obj) return NULL;
+	
+	obj->fill = 0;
+	obj->allocSize = 1 << pot;
+	obj->buckets = malloc(sizeof(*obj->buckets) * obj->allocSize);
+	if(!obj->buckets) {
+		free(obj);
+		return NULL;
+	}
+	
+	return obj;
+}
+
+
+// uses a truncated 128bit murmur3 hash
+static uint64_t hash_key(char* key, size_t len) {
+	uint64_t hash[2];
+	
+	// len is optional
+	if(len == -1) len = strlen(key);
+	
+	MurmurHash3_x64_128(key, len, MURMUR_SEED, hash);
+	
+	return hash[0];
+}
+
+static size_t find_bucket(struct json_obj* obj, uint64_t hash, char* key) {
+	size_t startBucket, bi;
+	
+	bi = startBucket = hash % obj->allocSize; 
+	
+	do {
+		struct json_obj_field* bucket;
+		
+		bucket = &obj->buckets[bi];
+		
+		// empty bucket
+		if(bucket->key == NULL) {
+			return bi;
+		}
+		
+		if(bucket->hash == hash) {
+			if(!strcmp(key, bucket->key)) {
+				// bucket is the right one and contains a value already
+				return bi;
+			}
+			
+			// collision, probe next bucket
+		}
+		
+		bi = (bi + 1) % obj->allocSize;
+	} while(bi != startBucket);
+	
+	// should never reach here if the table is maintained properly
+	return -1;
+}
+
+// TODO: better return values and missing key handling
+// returns 0 if val is set to the value
+// *val == NULL && return 0  means the key was not found;
+int json_obj_get_key(struct json_obj* obj, char* key, struct json_value** val) {
+	uint64_t hash;
+	size_t bi;
+	
+	hash = hash_key(key, -1);
+	
+	bi = find_bucket(obj, hash, key);
+	if(bi < 0) return 1;
+	
+	*val = obj->buckets[bi].value; 
+	return 0;
+}
+
+// zero for success
+int json_obj_set_key(struct json_obj* obj, char* key, struct json_value* val) {
+	uint64_t hash;
+	size_t bi;
+	
+	// TODO: check size and grow if necessary
+	
+	hash = hash_key(key, -1);
+	
+	bi = find_bucket(obj, hash, key);
+	if(bi < 0) return 1;
+	
+	obj->buckets[bi].value = val;
+	
+	return 0;
+}
+
 
 enum token_type {
 	TOKEN_NONE = 0,
@@ -432,6 +599,8 @@ int lex_comment_token(struct json_lexer* jl) {
 	
 	len = se - jl->head - 1;
 	
+#ifndef JSON_DISCARD_COMMENTS
+	
 	str = malloc(len+1);
 	check_oom(str)
 	
@@ -450,8 +619,9 @@ int lex_comment_token(struct json_lexer* jl) {
 	
 	lex_push_token_val(jl, TOKEN_COMMENT, val);
 	
-	// advance to the end of the string
+#endif // JSON_DISCARD_COMMENTS
 	
+	// advance to the end of the string
 	jl->head = se;
 	jl->char_num = char_num;
 	jl->line_num += lines;
@@ -662,8 +832,47 @@ void consume_comments(struct json_parser* jp) {
 
 // compact the stack
 void reduce_array(struct json_parser* jp) {
+	/* what the stack should look like now
+	  ...
+	1 array
+	0 any value
 	
+	*/
+	if(jp->stack_cnt < 2) {
+		jp->error = 7;
+		return;
+	}
 	
+	struct json_value** st = jp->stack + jp->stack_cnt - 1; 
+	struct json_value* v = st[0];
+	struct json_value* arr = st[-1];
+	
+	// append v to arr
+	
+	jp->stack_cnt--;
+}
+
+void reduce_object(struct json_parser* jp) {
+	/* what the stack should look like now
+	  ...
+	2 object
+	1 label
+	0 any value
+	
+	*/
+	if(jp->stack_cnt < 3) {
+		jp->error = 8;
+		return;
+	}
+	
+	struct json_value** st = jp->stack + jp->stack_cnt - 1; 
+	struct json_value* v = st[0];
+	struct json_value* l = st[-1];
+	struct json_value* obj = st[-2];
+	
+	// insert l:v into obj
+	
+	jp->stack_cnt -= 2;
 }
 
 struct json_value* parse_token_stream(struct json_lexer* jl) {
@@ -701,10 +910,12 @@ struct json_value* parse_token_stream(struct json_lexer* jl) {
 				goto PARSE_ARRAY;
 				
 			case TOKEN_ARRAY_END:
-				// pop from the stack until array start token found
+				// array on top of stack is now a value
+				// look behind and process the sentinel 
+				break;
 			
 			case TOKEN_OBJ_START:
-				parser_push_val(jp, RESUME_ARRAY);
+				parser_push_val(jp, RESUME_OBJ);
 				parser_push_new_array(jp);
 				goto PARSE_OBJ;
 				
@@ -713,8 +924,9 @@ struct json_value* parse_token_stream(struct json_lexer* jl) {
 			case TOKEN_NULL:
 			case TOKEN_UNDEFINED:
 				parser_push_val(jp, tok->val);
-				next();
 				reduce_array(jp);
+				
+				next();
 				
 				goto PARSE_ARRAY;
 		
@@ -731,19 +943,65 @@ struct json_value* parse_token_stream(struct json_lexer* jl) {
 		}
 	
 	
-PARSE_OBJ:
-	for(; i < jl->ts_cnt; i++, tok++) {
-		// cycle: label, colon, value
-		if(tok[0].tokenType != TOKEN_LABEL) {
-			// parse error
-		}
-		if(tok[1].tokenType != TOKEN_COLON) {
-			// parse error
-		}
-		
-		
+	PARSE_OBJ:
+	// cycle: label, colon, val, comma
 	
-	}
+		if(tok->tokenType == TOKEN_OBJ_END) {
+			// obj on top of stack is now a value
+			// look behind and process the sentinel 
+		}
+		else if(tok->tokenType != TOKEN_LABEL) {
+			// error
+		}
+		parser_push_val(jp, tok->val);
+		next();
+		
+		if(tok->tokenType != TOKEN_COLON) {
+			// error
+		}
+		next();
+
+	
+		switch(tok->tokenType) {
+		
+			case TOKEN_ARRAY_START:
+				parser_push_val(jp, RESUME_ARRAY);
+				parser_push_new_array(jp);
+				goto PARSE_ARRAY;
+				
+			case TOKEN_OBJ_END:
+				// obj on top of stack is now a value
+				// look behind and process the sentinel 
+				break;
+			
+			case TOKEN_OBJ_START:
+				parser_push_val(jp, RESUME_OBJ);
+				parser_push_new_array(jp);
+				goto PARSE_OBJ;
+				
+			case TOKEN_STRING:
+			case TOKEN_NUMBER:
+			case TOKEN_NULL:
+			case TOKEN_UNDEFINED:
+				parser_push_val(jp, tok->val);
+				reduce_array(jp);
+				
+				next();
+				
+				goto PARSE_ARRAY;
+		
+			case TOKEN_ARRAY_END:
+				goto BRACE_MISMATCH;
+			
+			case TOKEN_NONE:
+			case TOKEN_LABEL:
+			case TOKEN_COMMA:
+			case TOKEN_COLON:
+			default:
+				// invalid
+				goto UNEXPECTED_TOKEN;
+		}
+	
 
 	return NULL;
 END:
@@ -751,6 +1009,8 @@ END:
 UNEXPECTED_EOI: // end of input
 	return NULL;
 UNEXPECTED_TOKEN:
+	return NULL;
+BRACE_MISMATCH:
 	return NULL;
 BRACKET_MISMATCH:
 	return NULL;
