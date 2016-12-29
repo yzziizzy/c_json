@@ -8,6 +8,11 @@
 
 #define MURMUR_SEED 718281828
 
+struct token;
+static void dbg_print_token(struct token* ts);
+
+
+
 struct json_array* json_create_array() {
 
 	struct json_array* arr;
@@ -34,8 +39,6 @@ int json_array_push_tail(struct json_array* arr, struct json_value* val) {
 	node->next = NULL;
 	node->value = val;
 	
-	arr->length++;
-	
 	if(arr->length == 0) {
 		arr->tail = node;
 		arr->head = node;
@@ -44,6 +47,8 @@ int json_array_push_tail(struct json_array* arr, struct json_value* val) {
 		arr->tail->next = node;
 		arr->tail = node;
 	}
+	
+	arr->length++;
 	
 	return 0;
 }
@@ -75,19 +80,16 @@ int json_array_pop_tail(struct json_array* arr, struct json_value** val) {
 	return 0;
 }
 
-struct json_obj* json_create_obj(int allocPOT) {
+struct json_obj* json_create_obj(size_t initial_alloc_size) {
 	
-	int pot, allocSz;
 	struct json_obj* obj;
-	
-	pot = allocPOT < 4 ? 4 : allocPOT;
-	
+
 	obj = malloc(sizeof(*obj));
 	if(!obj) return NULL;
 	
 	obj->fill = 0;
-	obj->allocSize = 1 << pot;
-	obj->buckets = calloc(1, sizeof(*obj->buckets) * obj->allocSize);
+	obj->alloc_size = initial_alloc_size;
+	obj->buckets = calloc(1, sizeof(*obj->buckets) * obj->alloc_size);
 	if(!obj->buckets) {
 		free(obj);
 		return NULL;
@@ -112,7 +114,7 @@ static uint64_t hash_key(char* key, size_t len) {
 static size_t find_bucket(struct json_obj* obj, uint64_t hash, char* key) {
 	size_t startBucket, bi;
 	
-	bi = startBucket = hash % obj->allocSize; 
+	bi = startBucket = hash % obj->alloc_size; 
 	
 	do {
 		struct json_obj_field* bucket;
@@ -133,7 +135,7 @@ static size_t find_bucket(struct json_obj* obj, uint64_t hash, char* key) {
 			// collision, probe next bucket
 		}
 		
-		bi = (bi + 1) % obj->allocSize;
+		bi = (bi + 1) % obj->alloc_size;
 	} while(bi != startBucket);
 	
 	// should never reach here if the table is maintained properly
@@ -141,14 +143,15 @@ static size_t find_bucket(struct json_obj* obj, uint64_t hash, char* key) {
 }
 
 
-int json_obj_grow(struct json_obj* obj, int newSize) {
+// should always be called with a power of two
+int json_obj_resize(struct json_obj* obj, int newSize) {
 	struct json_obj_field* old, *op;
-	size_t oldlen = obj->allocSize;
+	size_t oldlen = obj->alloc_size;
 	size_t i, n, bi;
 	
 	old = op = obj->buckets;
 	
-	obj->allocSize = newSize;
+	obj->alloc_size = newSize;
 	obj->buckets = calloc(1, sizeof(*obj->buckets) * newSize);
 	if(!obj->buckets) return 1;
 	
@@ -167,6 +170,7 @@ int json_obj_grow(struct json_obj* obj, int newSize) {
 	
 	return 0;
 }
+
 
 // TODO: better return values and missing key handling
 // returns 0 if val is set to the value
@@ -189,7 +193,10 @@ int json_obj_set_key(struct json_obj* obj, char* key, struct json_value* val) {
 	uint64_t hash;
 	size_t bi;
 	
-	// TODO: check size and grow if necessary
+	// check size and grow if necessary
+	if(obj->fill / obj->alloc_size >= 0.75) {
+		json_obj_resize(obj, obj->alloc_size * 2);
+	}
 	
 	hash = hash_key(key, -1);
 	
@@ -540,6 +547,7 @@ int lex_label_token(struct json_lexer* jl) {
 	//printf("error: %d\n", jl->error);
 	
 	strncpy(str, jl->head, len);
+	str[len] = 0;// BUG sometiems this gets messed up?
 	
 // printf("error: %d\n", jl->error);
 	// json value
@@ -769,6 +777,7 @@ struct json_value* RESUME_ARRAY = (struct json_value*)&RESUME_ARRAY;
 
 // the slot above contains a label, the slot above that contains the object to merge into
 struct json_value* RESUME_OBJ = (struct json_value*)&RESUME_OBJ;
+struct json_value* ROOT_VALUE = (struct json_value*)&ROOT_VALUE;
 
 
 
@@ -817,20 +826,35 @@ void parser_push_new_array(struct json_parser* jp) {
 		return;
 	}
 	
-	arr = malloc(sizeof(*arr));
+	arr = json_create_array();
 	if(!arr) {
 		jp->error = 5;
 		return;
 	}
 	
-	arr->head = NULL;
-	arr->tail = NULL;
-	arr->length = 0;
-	
 	val->type = JSON_TYPE_ARRAY;
 	val->v.arr = arr;
 	
 	parser_push(jp, val);
+}
+
+void parser_push_new_object(struct json_parser* jp) {
+	
+	struct json_value* val;
+	struct json_obj* obj;
+	
+	val = malloc(sizeof(*val));
+	if(!val) {
+		jp->error = 5;
+		return;
+	}
+	
+	obj = json_create_obj(4);
+	
+	val->type = JSON_TYPE_ARRAY;
+	val->v.obj = obj;
+	
+	parser_push(jp, obj);
 }
 
 // push items into the array on the top of the stack
@@ -846,6 +870,8 @@ struct token* consume_token(struct json_parser* jp) {
 		return NULL;
 	}
 	
+	printf("ct-%d-", jp->cur_token[1].line_num); dbg_print_token(jp->cur_token + 1);
+	
 	return ++jp->cur_token;
 }
 
@@ -858,7 +884,15 @@ void consume_comments(struct json_parser* jp) {
 	}
 }
 
-// compact the stack
+void consume_commas(struct json_parser* jp) {
+	while(1) {
+		if(jp->cur_token[1].tokenType != TOKEN_COMMA) break;
+		
+		//parser_push(jp, jp->cur_token->val);
+		consume_token(jp);
+	}
+}
+
 void reduce_array(struct json_parser* jp) {
 	/* what the stack should look like now
 	  ...
@@ -866,7 +900,9 @@ void reduce_array(struct json_parser* jp) {
 	0 any value
 	
 	*/
+	
 	if(jp->stack_cnt < 2) {
+		dbg_printf("stack too short in reduce_array: %d \n", jp->stack_cnt);
 		jp->error = 7;
 		return;
 	}
@@ -875,6 +911,7 @@ void reduce_array(struct json_parser* jp) {
 	struct json_value* v = st[0];
 	struct json_value* arr = st[-1];
 	
+	if(arr == ROOT_VALUE) return;
 	// append v to arr
 	json_array_push_tail(arr->v.arr, v);
 	
@@ -899,11 +936,24 @@ void reduce_object(struct json_parser* jp) {
 	struct json_value* l = st[-1];
 	struct json_value* obj = st[-2];
 	
+	if(obj == ROOT_VALUE) return;
+	
 	// insert l:v into obj
 	json_obj_set_key(obj, l->v.str, v);
 	// BUG? free label value?
 	
 	jp->stack_cnt -= 2;
+}
+
+void close_array(struct json_parser* jp) {
+	/* what the stack should look like now
+	  ...
+	3 parent container 
+	2 -- resume sentinel --
+	1 array to be closed
+	0 any value
+	
+	*/
 }
 
 struct json_value* parse_token_stream(struct json_lexer* jl) {
@@ -924,126 +974,232 @@ struct json_value* parse_token_stream(struct json_lexer* jl) {
 
 	i = 0;
 
+	
+	
 #define next() if(!(tok = consume_token(jp))) goto UNEXPECTED_EOI;
 
-	consume_comments(jp);
+	parser_push(jp, ROOT_VALUE);
+	
+// 	consume_comments(jp);
 
 	PARSE_ARRAY:
+		dbg_printf("\nparse_array\n");
+		
+		if(jp->cur_token >= jp->last_token) goto CHECK_END;
 
-		consume_comments(jp); // BUG need macro here to advance tok if it changed
+// 		consume_comments(jp); // BUG need macro here to advance tok if it changed
 		
 		// cycle: val, comma
 		switch(tok->tokenType) {
 		
-			case TOKEN_ARRAY_START:
+			case TOKEN_ARRAY_START: dbg_printf("TOKEN_ARRAY_START\n");
 				parser_push(jp, RESUME_ARRAY);
 				parser_push_new_array(jp);
+				next();
 				goto PARSE_ARRAY;
 				
-			case TOKEN_ARRAY_END:
-				// array on top of stack is now a value
-				// look behind and process the sentinel 
+			case TOKEN_ARRAY_END: dbg_printf("TOKEN_ARRAY_END\n");
+				/* what the stack should look like now
+					...
+					3 parent container 
+					2 ? possibly a label ?
+					1 -- resume sentinel --
+					0 array to be closed
+				*/
+				{
+					// TODO check stack depth
+					struct json_value* closed = parser_pop(jp);
+					struct json_value* sentinel = parser_pop(jp);
+					
+					// put the closed array back on the stack then reduce it appropriately
+					parser_push(jp, closed);
+					
+					if(sentinel == RESUME_ARRAY) {
+						reduce_array(jp);
+						
+						consume_commas(jp);
+						next();
+						goto PARSE_ARRAY;
+					}
+					else if(sentinel == RESUME_OBJ) {
+						reduce_object(jp);
+						
+						consume_commas(jp);
+						next();
+						goto PARSE_OBJ;
+					}
+					else {
+						goto INVALID_SENTINEL;
+					}
+				}
+				consume_commas(jp);
+				next();
 				break;
 			
-			case TOKEN_OBJ_START:
-				parser_push(jp, RESUME_OBJ);
-				parser_push_new_array(jp);
+			case TOKEN_OBJ_START: dbg_printf("PARSE_OBJ\n");
+				parser_push(jp, RESUME_ARRAY);
+				parser_push_new_object(jp);
+				next();
 				goto PARSE_OBJ;
 				
 			case TOKEN_STRING:
 			case TOKEN_NUMBER:
 			case TOKEN_NULL:
-			case TOKEN_UNDEFINED:
+			case TOKEN_UNDEFINED: dbg_printf("PARSE VALUE \n");
 				parser_push(jp, tok->val);
 				reduce_array(jp);
 				
+				consume_commas(jp);
 				next();
 				
 				goto PARSE_ARRAY;
 		
-			case TOKEN_OBJ_END:
+			case TOKEN_OBJ_END: dbg_printf("BRACKET_MISMATCH\n");
 				goto BRACKET_MISMATCH;
 			
 			case TOKEN_NONE:
 			case TOKEN_LABEL:
 			case TOKEN_COMMA:
-			case TOKEN_COLON:
-			default:
+			case TOKEN_COLON: 
+			default: dbg_printf("UNEXPECTED_TOKEN\n");
 				// invalid
 				goto UNEXPECTED_TOKEN;
 		}
 	
+		return 1;
 	
 	PARSE_OBJ:
+		dbg_printf("\nparse_obj\n");
 	// cycle: label, colon, val, comma
 	
 		if(tok->tokenType == TOKEN_OBJ_END) {
-			// obj on top of stack is now a value
-			// look behind and process the sentinel 
+			dbg_printf("obj- TOKEN_OBJ_END\n");
+			/* what the stack should look like now
+				...
+				3 parent container 
+				2 ? possibly a label ?
+				1 -- resume sentinel --
+				0 object to be closed
+			*/
+			{
+				// TODO check stack depth
+				struct json_value* closed = parser_pop(jp);
+				struct json_value* sentinel = parser_pop(jp);
+				
+				// put the closed array back on the stack then reduce it appropriately
+				parser_push(jp, closed);
+				if(sentinel == RESUME_ARRAY) {
+					reduce_array(jp);
+					
+					consume_commas(jp);
+					next();
+					goto PARSE_ARRAY;
+				}
+				else if(sentinel == RESUME_OBJ) {
+					reduce_object(jp);
+					
+					consume_commas(jp);
+					next();
+					goto PARSE_OBJ;
+				}
+				else {
+					goto INVALID_SENTINEL;
+				}
+			}
+			
+			dbg_printf("ending obj in begining of obj\n");
+			goto UNEXPECTED_TOKEN;
 		}
 		else if(tok->tokenType != TOKEN_LABEL) {
 			// error
+			dbg_printf("!!!missing label\n");
+			goto UNEXPECTED_TOKEN;
 		}
 		parser_push(jp, tok->val);
 		next();
 		
 		if(tok->tokenType != TOKEN_COLON) {
 			// error
+			dbg_printf("!!!missing colon\n");
+			goto UNEXPECTED_TOKEN;
 		}
 		next();
 
 	
 		switch(tok->tokenType) {
 		
-			case TOKEN_ARRAY_START:
-				parser_push(jp, RESUME_ARRAY);
-				parser_push_new_array(jp);
-				goto PARSE_ARRAY;
-				
-			case TOKEN_OBJ_END:
-				// obj on top of stack is now a value
-				// look behind and process the sentinel 
-				break;
-			
-			case TOKEN_OBJ_START:
+			case TOKEN_ARRAY_START: dbg_printf("obj- TOKEN_ARRAY_START\n");
 				parser_push(jp, RESUME_OBJ);
 				parser_push_new_array(jp);
+				next();
+				goto PARSE_ARRAY;
+				
+			case TOKEN_OBJ_END: dbg_printf("obj- !!!TOKEN_OBJ_END in value slot\n");
+
+				
+				 dbg_printf("!!! escaped sentinel block\n");
+				break;
+			
+			case TOKEN_OBJ_START: dbg_printf("obj- TOKEN_OBJ_START\n");
+				parser_push(jp, RESUME_OBJ);
+				parser_push_new_object(jp); // BUG
+				next();
 				goto PARSE_OBJ;
 				
 			case TOKEN_STRING:
 			case TOKEN_NUMBER:
 			case TOKEN_NULL:
-			case TOKEN_UNDEFINED:
+			case TOKEN_UNDEFINED: dbg_printf("obj- TOKEN VALUE\n");
 				parser_push(jp, tok->val);
-				reduce_array(jp);
+				reduce_object(jp);
 				
+				consume_commas(jp);
 				next();
 				
-				goto PARSE_ARRAY;
+				goto PARSE_OBJ;
 		
-			case TOKEN_ARRAY_END:
+			case TOKEN_ARRAY_END: dbg_printf("obj- BRACE_MISMATCH\n");
 				goto BRACE_MISMATCH;
 			
 			case TOKEN_NONE:
 			case TOKEN_LABEL:
 			case TOKEN_COMMA:
 			case TOKEN_COLON:
-			default:
+			default: dbg_printf("obj- UNEXPECTED_TOKEN\n");
 				// invalid
 				goto UNEXPECTED_TOKEN;
 		}
 	
+	dbg_printf("end of obj\n");
 
 	return NULL;
-END:
-	return NULL;
+CHECK_END:  dbg_printf("!!! CHECK_END\n");
+	if(jp->stack_cnt == 2) {
+		// check root value sentinel
+		// good, fall through to END
+	}
+	else if(jp->stack_cnt == 1) {
+		// the file is empty
+		goto UNEXPECTED_EOI;
+	}
+	else {
+		// stuff is left on the stack
+		goto UNEXPECTED_EOI;
+	}
+	//i = *((int*)0);
+END:  dbg_printf("!!! END\n");
+	if(jp->error) printf("parsing error: %d\n", jp->error);
+	return jp;
 UNEXPECTED_EOI: // end of input
+	dbg_printf("!!! UNEXPECTED_EOI\n");
 	return NULL;
-UNEXPECTED_TOKEN:
+UNEXPECTED_TOKEN: dbg_printf("!!! UNEXPECTED_TOKEN\n");
 	return NULL;
-BRACE_MISMATCH:
+BRACE_MISMATCH: dbg_printf("!!! BRACE_MISMATCH\n");
 	return NULL;
-BRACKET_MISMATCH:
+BRACKET_MISMATCH: dbg_printf("!!! BRACKET_MISMATCH\n");
+	return NULL;
+INVALID_SENTINEL: dbg_printf("!!! INVALID_SENTINEL\n");
 	return NULL;
 }
 
@@ -1083,7 +1239,25 @@ int main(int argc, char* argv[]) {
 	//exit(1);
 	int i;
 	for(i = 0; i < jl->ts_cnt; i++, ts++) {
-		switch(ts->tokenType) {
+		dbg_print_token(ts);
+	}
+	
+	printf("\n----------------\n\n");
+	
+	parse_token_stream(jl);
+	
+	free(contents);
+	
+	
+	return 0;
+}
+
+
+#define tc(x, y, z) case x: printf(#x ": " y "\n", z); break;
+#define tcl(x) case x: printf(#x "\n"); break;
+
+static void dbg_print_token(struct token* ts) {
+	switch(ts->tokenType) {
 		tcl(TOKEN_NONE)
 		tcl(TOKEN_ARRAY_START)
 		tcl(TOKEN_ARRAY_END)
@@ -1099,19 +1273,8 @@ int main(int argc, char* argv[]) {
 		tcl(TOKEN_COMMA)
 		tcl(TOKEN_COLON)
 		tc(TOKEN_COMMENT, "%s", ts->val->v.str)
-		}
 	}
-	
-	
-	free(contents);
-	
-	
-	return 0;
 }
-
-
-
-
 
 
 

@@ -45,7 +45,7 @@ struct json_obj_field {
 
 
 struct json_obj {
-	size_t allocSize;
+	size_t alloc_size;
 	size_t fill;
 	struct json_obj_field* buckets; 
 };
