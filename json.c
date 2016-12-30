@@ -8,9 +8,78 @@
 
 #define MURMUR_SEED 718281828
 
-struct token;
-static void dbg_print_token(struct token* ts);
 
+enum token_type {
+	TOKEN_NONE = 0,
+	TOKEN_ARRAY_START,
+	TOKEN_ARRAY_END,
+	TOKEN_OBJ_START,
+	TOKEN_OBJ_END,
+	TOKEN_STRING,
+	TOKEN_NUMBER,
+	TOKEN_NULL,
+	TOKEN_INFINITY,
+	TOKEN_UNDEFINED,
+	TOKEN_NAN,
+	TOKEN_LABEL,
+	TOKEN_COMMA,
+	TOKEN_COLON,
+	TOKEN_COMMENT
+};
+
+struct token {
+	int line_num;
+	int char_num;
+	enum token_type tokenType;
+	struct json_value* val;
+};
+
+struct json_lexer {
+	char* source;
+	char* end;
+	size_t source_len;
+	
+	// output info
+	struct token* token_stream;
+	size_t ts_cnt;
+	size_t ts_alloc;
+	
+	// stateful info
+	char* head;
+	int line_num; // these are 1-based
+	int char_num;
+	int error;
+};
+
+
+
+struct json_parser {
+	struct token* token_stream;
+	struct token* cur_token;
+	struct token* last_token;
+	int ts_len;
+	
+	struct json_value** stack;
+	int stack_cnt;
+	int stack_alloc;
+	
+	int error;
+};
+
+
+// sentinels for the parser stack
+
+// the slot above contains an array, merge into it
+struct json_value* RESUME_ARRAY = (struct json_value*)&RESUME_ARRAY;
+
+// the slot above contains a label, the slot above that contains the object to merge into
+struct json_value* RESUME_OBJ = (struct json_value*)&RESUME_OBJ;
+struct json_value* ROOT_VALUE = (struct json_value*)&ROOT_VALUE;
+
+
+
+static void dbg_print_token(struct token* ts);
+static void dbg_dump_stack(struct json_parser* jp, int depth);
 
 
 struct json_array* json_create_array() {
@@ -209,61 +278,9 @@ int json_obj_set_key(struct json_obj* obj, char* key, struct json_value* val) {
 }
 
 
-enum token_type {
-	TOKEN_NONE = 0,
-	TOKEN_ARRAY_START,
-	TOKEN_ARRAY_END,
-	TOKEN_OBJ_START,
-	TOKEN_OBJ_END,
-	TOKEN_STRING,
-	TOKEN_NUMBER,
-	TOKEN_NULL,
-	TOKEN_INFINITY,
-	TOKEN_UNDEFINED,
-	TOKEN_NAN,
-	TOKEN_LABEL,
-	TOKEN_COMMA,
-	TOKEN_COLON,
-	TOKEN_COMMENT
-};
-
-enum lex_error {
-	LEX_ERROR_NONE = 0,
-	LEX_ERROR_OOM,
-	LEX_ERROR_NULL_IN_STRING,
-	LEX_ERROR_NULL_BYTE,
-	LEX_ERROR_INVALID_STRING,
-	LEX_ERROR_UNEXPECTED_END_OF_INPUT,
-	LEX_ERROR_INVALID_CHAR
-};
-
-struct token {
-	int line_num;
-	int char_num;
-	enum token_type tokenType;
-	struct json_value* val;
-};
-
-struct json_lexer {
-	char* source;
-	char* end;
-	size_t source_len;
-	
-	// output info
-	struct token* token_stream;
-	size_t ts_cnt;
-	size_t ts_alloc;
-	
-	// stateful info
-	char* head;
-	int line_num; // these are 1-based
-	int char_num;
-	int error;
-};
-
 #define check_oom(x) \
 if(x == NULL) { \
-	jl->error = LEX_ERROR_OOM; \
+	jl->error = JSON_ERROR_OOM; \
 	return 1; \
 }
 
@@ -369,7 +386,7 @@ int lex_push_token_val(struct json_lexer* jl, enum token_type t, struct json_val
 	
 	return 0;
 }
-int count = 0;
+
 
 int lex_string_token(struct json_lexer* jl) {
 	size_t len;
@@ -388,7 +405,7 @@ int lex_string_token(struct json_lexer* jl) {
 	while(1) {
 		if(*se == delim) break;
 		if(*se == '\0') {
-			jl->error = LEX_ERROR_NULL_IN_STRING;
+			jl->error = JSON_LEX_ERROR_NULL_IN_STRING;
 			return 1;
 		}
 		
@@ -400,7 +417,7 @@ int lex_string_token(struct json_lexer* jl) {
 		se++;
 	//	printf("%d.%d\n", jl->line_num + lines, char_num);
 		if(se > jl->end) {
-			jl->error = LEX_ERROR_UNEXPECTED_END_OF_INPUT;
+			jl->error = JSON_LEX_ERROR_UNEXPECTED_END_OF_INPUT;
 			return 1;
 		}
 	}
@@ -414,7 +431,7 @@ int lex_string_token(struct json_lexer* jl) {
 	//printf("error: %d\n", jl->error);
 	
 	if(decode_c_escape_str(jl->head + 1, str, len)) {
-		jl->error = LEX_ERROR_INVALID_STRING;
+		jl->error = JSON_LEX_ERROR_INVALID_STRING;
 		return 1;
 	}
 //printf("error: %d\n", jl->error);
@@ -532,7 +549,7 @@ int lex_label_token(struct json_lexer* jl) {
 		se++;
 		//printf("%d.%d\n", jl->line_num, char_num);
 		if(se > jl->end) {
-			jl->error = LEX_ERROR_UNEXPECTED_END_OF_INPUT;
+			jl->error = JSON_LEX_ERROR_UNEXPECTED_END_OF_INPUT;
 			return 1;
 		}
 	}
@@ -593,7 +610,7 @@ int lex_comment_token(struct json_lexer* jl) {
 		while(1) {
 			if(se[0] == '\n') break;
 			if(*se == '\0') {
-				jl->error = LEX_ERROR_NULL_BYTE;
+				jl->error = JSON_LEX_ERROR_NULL_BYTE;
 				return 1;
 			}
 			
@@ -601,7 +618,7 @@ int lex_comment_token(struct json_lexer* jl) {
 			se++;
 			
 			if(se > jl->end) {
-				jl->error = LEX_ERROR_UNEXPECTED_END_OF_INPUT;
+				jl->error = JSON_LEX_ERROR_UNEXPECTED_END_OF_INPUT;
 				return 1;
 			}
 		}
@@ -611,7 +628,7 @@ int lex_comment_token(struct json_lexer* jl) {
 		while(1) {
 			if(se[0] == '*' && se[1] == '/') break;
 			if(*se == '\0') {
-				jl->error = LEX_ERROR_NULL_BYTE;
+				jl->error = JSON_LEX_ERROR_NULL_BYTE;
 				return 1;
 			}
 			
@@ -623,19 +640,19 @@ int lex_comment_token(struct json_lexer* jl) {
 			se++;
 			
 			if(se > jl->end) {
-				jl->error = LEX_ERROR_UNEXPECTED_END_OF_INPUT;
+				jl->error = JSON_LEX_ERROR_UNEXPECTED_END_OF_INPUT;
 				return 1;
 			}
 		}
 	}
 	else {
-		jl->error = LEX_ERROR_INVALID_CHAR;
+		jl->error = JSON_LEX_ERROR_INVALID_CHAR;
 		return 1;
 	}
 	
 	len = se - jl->head - 1;
 	
-#ifndef JSON_DISCARD_COMMENTS
+#if JSON_DISCARD_COMMENTS == 0
 	
 	str = malloc(len+1);
 	check_oom(str)
@@ -712,7 +729,7 @@ int lex_nibble(struct json_lexer* jl) {
 			}
 			
 			// lex error
-			jl->error = LEX_ERROR_INVALID_CHAR;
+			jl->error = JSON_LEX_ERROR_INVALID_CHAR;
 			return 1;
 	}
 	
@@ -756,29 +773,6 @@ struct json_lexer* tokenize_string(char* source, size_t len) {
 }
 
 
-struct json_parser {
-	struct token* token_stream;
-	struct token* cur_token;
-	struct token* last_token;
-	int ts_len;
-	
-	struct json_value** stack;
-	int stack_cnt;
-	int stack_alloc;
-	
-	int error;
-};
-
-
-// sentinels for the parser stack
-
-// the slot above contains an array, merge into it
-struct json_value* RESUME_ARRAY = (struct json_value*)&RESUME_ARRAY;
-
-// the slot above contains a label, the slot above that contains the object to merge into
-struct json_value* RESUME_OBJ = (struct json_value*)&RESUME_OBJ;
-struct json_value* ROOT_VALUE = (struct json_value*)&ROOT_VALUE;
-
 
 
 void parser_push(struct json_parser* jp, struct json_value* v) {
@@ -793,7 +787,7 @@ void parser_push(struct json_parser* jp, struct json_value* v) {
 		alloc *= 2;
 		tmp = realloc(jp->stack, alloc * sizeof(*(jp->stack)));
 		if(!tmp) {
-			jp->error = 1;
+			jp->error = JSON_ERROR_OOM;
 			return;
 		}
 		
@@ -808,7 +802,7 @@ void parser_push(struct json_parser* jp, struct json_value* v) {
 struct json_value* parser_pop(struct json_parser* jp) {
 	
 	if(jp->stack_cnt <= 0) {
-		jp->error = 2;
+		jp->error = JSON_PARSER_ERROR_STACK_EXHAUSTED;
 		return NULL;
 	}
 	
@@ -822,13 +816,13 @@ void parser_push_new_array(struct json_parser* jp) {
 	
 	val = malloc(sizeof(*val));
 	if(!val) {
-		jp->error = 5;
+		jp->error = JSON_ERROR_OOM;
 		return;
 	}
 	
 	arr = json_create_array();
 	if(!arr) {
-		jp->error = 5;
+		jp->error = JSON_ERROR_OOM;
 		return;
 	}
 	
@@ -845,28 +839,24 @@ void parser_push_new_object(struct json_parser* jp) {
 	
 	val = malloc(sizeof(*val));
 	if(!val) {
-		jp->error = 5;
+		jp->error = JSON_ERROR_OOM;
 		return;
 	}
 	
 	obj = json_create_obj(4);
 	
-	val->type = JSON_TYPE_ARRAY;
+	val->type = JSON_TYPE_OBJ;
 	val->v.obj = obj;
 	
-	parser_push(jp, obj);
-}
-
-// push items into the array on the top of the stack
-void parser_push_array(struct json_parser* jp, struct json_value* val) {
-	
-	// append to the array;
-	
+// 	printf("vt: %d\n", val);
+	dbg_dump_stack(jp, 3);
+	parser_push(jp, val);
+	dbg_dump_stack(jp, 4);
 }
 
 struct token* consume_token(struct json_parser* jp) {
 	if(jp->cur_token > jp->last_token) {
-		jp->error = 3;
+		jp->error = JSON_PARSER_ERROR_UNEXPECTED_EOI;
 		return NULL;
 	}
 	
@@ -903,7 +893,7 @@ void reduce_array(struct json_parser* jp) {
 	
 	if(jp->stack_cnt < 2) {
 		dbg_printf("stack too short in reduce_array: %d \n", jp->stack_cnt);
-		jp->error = 7;
+		jp->error = JSON_PARSER_ERROR_STACK_EXHAUSTED;
 		return;
 	}
 	
@@ -912,6 +902,11 @@ void reduce_array(struct json_parser* jp) {
 	struct json_value* arr = st[-1];
 	
 	if(arr == ROOT_VALUE) return;
+	
+	if(arr->type != JSON_TYPE_ARRAY) {
+		jp->error = JSON_PARSER_ERROR_CORRUPT_STACK;
+		return;
+	}
 	// append v to arr
 	json_array_push_tail(arr->v.arr, v);
 	
@@ -927,7 +922,7 @@ void reduce_object(struct json_parser* jp) {
 	
 	*/
 	if(jp->stack_cnt < 3) {
-		jp->error = 8;
+		jp->error = JSON_PARSER_ERROR_STACK_EXHAUSTED;
 		return;
 	}
 	
@@ -938,8 +933,22 @@ void reduce_object(struct json_parser* jp) {
 	
 	if(obj == ROOT_VALUE) return;
 	
+	// TODO: check label type
+	dbg_dump_stack(jp, 10);
+	if(obj->type != JSON_TYPE_OBJ) { printf("invalid obj\n");
+		
+		/*
+		dbg_printf("0 type: %d \n", v->type);
+		dbg_printf("1 type: %d \n", l->type);
+		dbg_printf("2 type: %d \n", obj->type);
+		dbg_printf("3 type: %d \n", st[-3]->type);
+		*/
+		jp->error = JSON_PARSER_ERROR_CORRUPT_STACK;
+		return;
+	}
+	
 	// insert l:v into obj
-	json_obj_set_key(obj, l->v.str, v);
+	json_obj_set_key(obj->v.obj, l->v.str, v);
 	// BUG? free label value?
 	
 	jp->stack_cnt -= 2;
@@ -1116,6 +1125,7 @@ struct json_value* parse_token_stream(struct json_lexer* jl) {
 			goto UNEXPECTED_TOKEN;
 		}
 		parser_push(jp, tok->val);
+		dbg_dump_stack(jp, 5);
 		next();
 		
 		if(tok->tokenType != TOKEN_COLON) {
@@ -1277,6 +1287,41 @@ static void dbg_print_token(struct token* ts) {
 }
 
 
+static void dbg_print_value(struct json_value* v) {
+	if(v == ROOT_VALUE) {
+		printf("ROOT_VALUE sentinel\n");
+		return;
+	}
+	if(v == RESUME_ARRAY) {
+		printf("RESUME_ARRAY sentinel\n");
+		return;
+	}
+	if(v == RESUME_OBJ) {
+		printf("RESUME_OBJ sentinel\n");
+		return;
+	}
+	
+	switch(v->type) {
+		case JSON_TYPE_UNDEFINED: printf("undefined\n"); break;
+		case JSON_TYPE_NULL: printf("null\n"); break;
+		case JSON_TYPE_INT: printf("int: %d\n", v->v.integer); break;
+		case JSON_TYPE_DOUBLE: printf("double %f\n", v->v.dbl); break;
+		case JSON_TYPE_STRING: printf("string: \"%s\"\n", v->v.str); break;
+		case JSON_TYPE_OBJ: printf("object [%d]\n", v->v.obj->fill); break;
+		case JSON_TYPE_ARRAY: printf("array [%d]\n", v->v.arr->length); break;
+		case JSON_TYPE_COMMENT_SINGLE: printf("comment, single\n"); break;
+		case JSON_TYPE_COMMENT_MULTI: printf("comment, multiline\n"); break;
+	}
+}
+
+static void dbg_dump_stack(struct json_parser* jp, int depth) {
+	int i = 0;
+	
+	for(i = 0; i < depth && i < jp->stack_cnt; i++) {
+		printf("%d: ", i);
+		dbg_print_value(jp->stack[jp->stack_cnt - i - 1]);
+	}
+}
 
 
 

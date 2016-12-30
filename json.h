@@ -3,7 +3,7 @@
 #define dbg_printf printf
 
 
-#define JSON_DISCARD_COMMENTS
+#define JSON_DISCARD_COMMENTS 1
 
 
 struct json_obj;
@@ -20,6 +20,22 @@ enum json_type {
 	JSON_TYPE_ARRAY,
 	JSON_TYPE_COMMENT_SINGLE,
 	JSON_TYPE_COMMENT_MULTI
+};
+
+enum json_error {
+	
+	JSON_ERROR_NONE = 0,
+	JSON_ERROR_OOM,
+	
+	JSON_LEX_ERROR_NULL_IN_STRING,
+	JSON_LEX_ERROR_NULL_BYTE,
+	JSON_LEX_ERROR_INVALID_STRING,
+	JSON_LEX_ERROR_UNEXPECTED_END_OF_INPUT,
+	JSON_LEX_ERROR_INVALID_CHAR,
+	
+	JSON_PARSER_ERROR_CORRUPT_STACK,
+	JSON_PARSER_ERROR_STACK_EXHAUSTED,
+	JSON_PARSER_ERROR_UNEXPECTED_EOI
 };
 
 struct json_value{
@@ -64,6 +80,16 @@ struct json_array {
 	struct json_array_node* tail;
 };
 
+struct json_file {
+	struct json_value* root;
+	
+	void* lex_info; // don't poke around in here...
+	
+	enum json_error error;
+	int err_line_num;
+	int err_char_num;
+	
+};
 
 
 

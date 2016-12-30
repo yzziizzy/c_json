@@ -36,11 +36,11 @@
 	comment */
 	{
 		a: 0,
-		b: "str A",
-		c: "str B",
-		d: "str C",
-		h: "str D", // force a realloc
-		i: "str I",
+//		b: "str A",
+//		c: "str B",
+//		d: "str C",
+//		h: "str D", // force a realloc
+		i: 2,
 	},
 	"lol",
 ]
