@@ -106,17 +106,17 @@ int json_array_push_tail(struct json_array* arr, struct json_value* val) {
 	if(!node) return 1;
 	
 	node->next = NULL;
+	node->prev = arr->tail;
 	node->value = val;
 	
 	if(arr->length == 0) {
-		arr->tail = node;
 		arr->head = node;
 	}
 	else {
 		arr->tail->next = node;
-		arr->tail = node;
 	}
 	
+	arr->tail = node;
 	arr->length++;
 	
 	return 0;
@@ -135,16 +135,16 @@ int json_array_pop_tail(struct json_array* arr, struct json_value** val) {
 	
 	*val = arr->tail->value;
 	
-	// TODO BUG: deal with length == 1 
+	if(arr->length > 0) {
+		t = arr->tail;
+		arr->tail = arr->tail->prev;
+		arr->tail->next = NULL;
+	}
+	else {
+		arr->head = arr->tail = NULL;
+	}
 	
-	// get the second to last node
-	t = arr->head;
-	while(t->next && t->next != arr->tail) t = t->next;
-	
-	free(arr->tail);
-	
-	t->next = NULL;
-	arr->tail = t;
+	free(t);
 	
 	return 0;
 }

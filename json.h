@@ -70,7 +70,7 @@ struct json_obj {
 
 
 struct json_array_node {
-	struct json_array_node* next;
+	struct json_array_node* next, *prev;
 	struct json_value* value;
 };
 
