@@ -93,6 +93,8 @@ struct json_file {
 
 
 
+struct json_file* json_load_path(char* path);
+struct json_file* json_read_file(FILE* f);
 
 
 
