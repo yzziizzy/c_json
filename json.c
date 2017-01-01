@@ -213,7 +213,7 @@ static size_t find_bucket(struct json_obj* obj, uint64_t hash, char* key) {
 
 
 // should always be called with a power of two
-int json_obj_resize(struct json_obj* obj, int newSize) {
+static int json_obj_resize(struct json_obj* obj, int newSize) {
 	struct json_obj_field* old, *op;
 	size_t oldlen = obj->alloc_size;
 	size_t i, n, bi;
@@ -286,7 +286,7 @@ if(x == NULL) { \
 
 // out must be big enough, at least as big as in+1 just to be safe
 // appends a null to out, but is also null-safe
-int decode_c_escape_str(char* in, char* out, size_t len) {
+static int decode_c_escape_str(char* in, char* out, size_t len) {
 	int i;
 	
 	for(i = 0; i < len; i++) {
@@ -335,7 +335,7 @@ int decode_c_escape_str(char* in, char* out, size_t len) {
 }
 
 // move forward one char
-void lex_next_char(struct json_lexer* jl) {
+static void lex_next_char(struct json_lexer* jl) {
 	if(jl->error) { 
 		printf("next char has error\n");
 		return;
@@ -354,13 +354,9 @@ void lex_next_char(struct json_lexer* jl) {
 }
 
 
-// returns error code. val set to null
-int lex_push_token(struct json_lexer* jl, enum token_type t) {
-	return lex_push_token_val(jl, t, NULL);
-}
 
 // returns erro code.
-int lex_push_token_val(struct json_lexer* jl, enum token_type t, struct json_value* val) {
+static int lex_push_token_val(struct json_lexer* jl, enum token_type t, struct json_value* val) {
 	size_t cnt, alloc;
 	void* tmp;
 	
@@ -387,8 +383,13 @@ int lex_push_token_val(struct json_lexer* jl, enum token_type t, struct json_val
 	return 0;
 }
 
+// returns error code. val set to null
+static int lex_push_token(struct json_lexer* jl, enum token_type t) {
+	return lex_push_token_val(jl, t, NULL);
+}
 
-int lex_string_token(struct json_lexer* jl) {
+
+static int lex_string_token(struct json_lexer* jl) {
 	size_t len;
 	struct json_value* val;
 	char* str;
@@ -456,7 +457,7 @@ int lex_string_token(struct json_lexer* jl) {
 }
 
 
-int lex_number_token(struct json_lexer* jl) {
+static int lex_number_token(struct json_lexer* jl) {
 	char* start, *s, *e;
 	int is_float = 0;
 	int negate =0;
@@ -527,7 +528,7 @@ int lex_number_token(struct json_lexer* jl) {
 }
 
 
-int lex_label_token(struct json_lexer* jl) {
+static int lex_label_token(struct json_lexer* jl) {
 	size_t len;
 	struct json_value* val;
 	char* str;
@@ -588,7 +589,7 @@ int lex_label_token(struct json_lexer* jl) {
 
 
 
-int lex_comment_token(struct json_lexer* jl) {
+static int lex_comment_token(struct json_lexer* jl) {
 	char* start, *se, *str;
 	char delim;
 	size_t len;
@@ -688,7 +689,7 @@ int lex_comment_token(struct json_lexer* jl) {
 }
 
 // returns false when there is no more input
-int lex_nibble(struct json_lexer* jl) {
+static int lex_nibble(struct json_lexer* jl) {
 	
 	char c = *jl->head;
 	
@@ -740,8 +741,8 @@ int lex_nibble(struct json_lexer* jl) {
 	return jl->error || jl->head >= jl->end;
 }
 
-
-struct json_lexer* tokenize_string(char* source, size_t len) {
+// this is the lexer
+static struct json_lexer* tokenize_string(char* source, size_t len) {
 	
 	struct json_lexer* jl;
 	
@@ -775,7 +776,7 @@ struct json_lexer* tokenize_string(char* source, size_t len) {
 
 
 
-void parser_push(struct json_parser* jp, struct json_value* v) {
+static void parser_push(struct json_parser* jp, struct json_value* v) {
 	void* tmp;
 	
 	int alloc = jp->stack_alloc;
@@ -799,7 +800,7 @@ void parser_push(struct json_parser* jp, struct json_value* v) {
 	jp->stack_cnt++;
 }
 
-struct json_value* parser_pop(struct json_parser* jp) {
+static struct json_value* parser_pop(struct json_parser* jp) {
 	
 	if(jp->stack_cnt <= 0) {
 		jp->error = JSON_PARSER_ERROR_STACK_EXHAUSTED;
@@ -809,7 +810,7 @@ struct json_value* parser_pop(struct json_parser* jp) {
 	return jp->stack[--jp->stack_cnt];
 }
 
-void parser_push_new_array(struct json_parser* jp) {
+static void parser_push_new_array(struct json_parser* jp) {
 	
 	struct json_value* val;
 	struct json_array* arr;
@@ -832,7 +833,7 @@ void parser_push_new_array(struct json_parser* jp) {
 	parser_push(jp, val);
 }
 
-void parser_push_new_object(struct json_parser* jp) {
+static void parser_push_new_object(struct json_parser* jp) {
 	
 	struct json_value* val;
 	struct json_obj* obj;
@@ -854,7 +855,8 @@ void parser_push_new_object(struct json_parser* jp) {
 	dbg_dump_stack(jp, 4);
 }
 
-struct token* consume_token(struct json_parser* jp) {
+// parser helper
+static inline struct token* consume_token(struct json_parser* jp) {
 	if(jp->cur_token > jp->last_token) {
 		jp->error = JSON_PARSER_ERROR_UNEXPECTED_EOI;
 		return NULL;
@@ -865,7 +867,9 @@ struct token* consume_token(struct json_parser* jp) {
 	return ++jp->cur_token;
 }
 
-void consume_comments(struct json_parser* jp) {
+
+// not used atm. comments will probably be moved to a side channel
+static void consume_comments(struct json_parser* jp) {
 	while(1) {
 		if(jp->cur_token->tokenType != TOKEN_COMMENT) break;
 		
@@ -874,7 +878,7 @@ void consume_comments(struct json_parser* jp) {
 	}
 }
 
-void consume_commas(struct json_parser* jp) {
+static void consume_commas(struct json_parser* jp) {
 	while(1) {
 		if(jp->cur_token[1].tokenType != TOKEN_COMMA) break;
 		
@@ -883,7 +887,7 @@ void consume_commas(struct json_parser* jp) {
 	}
 }
 
-void reduce_array(struct json_parser* jp) {
+static void reduce_array(struct json_parser* jp) {
 	/* what the stack should look like now
 	  ...
 	1 array
@@ -913,7 +917,7 @@ void reduce_array(struct json_parser* jp) {
 	jp->stack_cnt--;
 }
 
-void reduce_object(struct json_parser* jp) {
+static void reduce_object(struct json_parser* jp) {
 	/* what the stack should look like now
 	  ...
 	2 object
@@ -954,24 +958,14 @@ void reduce_object(struct json_parser* jp) {
 	jp->stack_cnt -= 2;
 }
 
-void close_array(struct json_parser* jp) {
-	/* what the stack should look like now
-	  ...
-	3 parent container 
-	2 -- resume sentinel --
-	1 array to be closed
-	0 any value
-	
-	*/
-}
 
-struct json_value* parse_token_stream(struct json_lexer* jl) {
+static struct json_value* parse_token_stream(struct json_lexer* jl) {
 	
 	int i;
 	struct json_parser* jp;
 	struct token* tok;
 	
-	jp = malloc(sizeof(*jp));
+	jp = calloc(1, sizeof(*jp));
 	if(!jp) {
 		return NULL;
 	}
@@ -983,21 +977,16 @@ struct json_value* parse_token_stream(struct json_lexer* jl) {
 
 	i = 0;
 
-	
-	
 #define next() if(!(tok = consume_token(jp))) goto UNEXPECTED_EOI;
 
+	// the root value sentinel helps a few algorithms and marks a proper end of input
 	parser_push(jp, ROOT_VALUE);
-	
-// 	consume_comments(jp);
 
 	PARSE_ARRAY:
 		dbg_printf("\nparse_array\n");
 		
 		if(jp->cur_token >= jp->last_token) goto CHECK_END;
-
-// 		consume_comments(jp); // BUG need macro here to advance tok if it changed
-		
+	
 		// cycle: val, comma
 		switch(tok->tokenType) {
 		
@@ -1075,7 +1064,7 @@ struct json_value* parse_token_stream(struct json_lexer* jl) {
 				goto UNEXPECTED_TOKEN;
 		}
 	
-		return 1;
+		return NULL;
 	
 	PARSE_OBJ:
 		dbg_printf("\nparse_obj\n");
@@ -1250,13 +1239,13 @@ struct json_file* json_read_file(FILE* f) {
 
 	jl = tokenize_string(contents, fsz);
 	
+	free(contents);
 	
 	if(!jl) return NULL;
 	
 	jp = parse_token_stream(jl);
-		free(contents);
 
-	return jp;
+	return jp->stack + 1;
 }
 
 int main(int argc, char* argv[]) {
@@ -1371,7 +1360,38 @@ static void dbg_dump_stack(struct json_parser* jp, int depth) {
 	}
 }
 
+char* json_get_type_str(enum json_type t) {
+	switch(t) {
+		case JSON_TYPE_UNDEFINED: return "undefined";
+		case JSON_TYPE_NULL: return "null";
+		case JSON_TYPE_INT: return "integer";
+		case JSON_TYPE_DOUBLE: return "double";
+		case JSON_TYPE_STRING: return "string";
+		case JSON_TYPE_OBJ: return "object";
+		case JSON_TYPE_ARRAY: return "array";
+		case JSON_TYPE_COMMENT_SINGLE: return "single-line comment";
+		case JSON_TYPE_COMMENT_MULTI: "multi-line comment";
+		default: return "Invalid JSON type";
+	}
+}
 
-
+char* json_get_err_str(enum json_error e) {
+	switch(e) {
+		case JSON_ERROR_NONE: return "No error";
+		case JSON_ERROR_OOM: return "Out of memory";
+		
+		case JSON_LEX_ERROR_NULL_IN_STRING: return "Null byte found in string";
+		case JSON_LEX_ERROR_NULL_BYTE: return "Null byte found in file";
+		case JSON_LEX_ERROR_INVALID_STRING: return "Invalid string";
+		case JSON_LEX_ERROR_UNEXPECTED_END_OF_INPUT: return "Unexpected end of input (lexer)";
+		case JSON_LEX_ERROR_INVALID_CHAR: return "Invalid character code";
+		
+		case JSON_PARSER_ERROR_CORRUPT_STACK: return "Parser stack corrupted";
+		case JSON_PARSER_ERROR_STACK_EXHAUSTED: return "Parser stack prematurely exhausted";
+		case JSON_PARSER_ERROR_UNEXPECTED_EOI: return "Unexpected end of input (parser)";
+		default: "Invalid Error Code";
+	}
+}
+	
 
 
