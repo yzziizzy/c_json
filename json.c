@@ -27,6 +27,13 @@ enum token_type {
 	TOKEN_COMMENT
 };
 
+struct json_obj_field {
+	uint64_t hash;
+	char* key;
+	struct json_value* value;
+};
+
+
 struct token {
 	int line_num;
 	int char_num;
@@ -82,7 +89,7 @@ static void dbg_print_token(struct token* ts);
 static void dbg_dump_stack(struct json_parser* jp, int depth);
 
 
-struct json_array* json_create_array() {
+struct json_array* json_array_create() {
 
 	struct json_array* arr;
 	
@@ -149,7 +156,7 @@ int json_array_pop_tail(struct json_array* arr, struct json_value** val) {
 	return 0;
 }
 
-struct json_obj* json_create_obj(size_t initial_alloc_size) {
+struct json_obj* json_obj_create(size_t initial_alloc_size) {
 	
 	struct json_obj* obj;
 
@@ -821,7 +828,7 @@ static void parser_push_new_array(struct json_parser* jp) {
 		return;
 	}
 	
-	arr = json_create_array();
+	arr = json_array_create();
 	if(!arr) {
 		jp->error = JSON_ERROR_OOM;
 		return;
@@ -844,7 +851,7 @@ static void parser_push_new_object(struct json_parser* jp) {
 		return;
 	}
 	
-	obj = json_create_obj(4);
+	obj = json_obj_create(4);
 	
 	val->type = JSON_TYPE_OBJ;
 	val->v.obj = obj;
@@ -1223,8 +1230,7 @@ struct json_file* json_load_path(char* path) {
 struct json_file* json_read_file(FILE* f) {
 	size_t fsz;
 	char* contents;
-	struct json_lexer* jl;
-	struct json_parser* jp;
+	struct json_file* jf;
 	size_t nr;
 	
 	// check file size
@@ -1237,13 +1243,28 @@ struct json_file* json_read_file(FILE* f) {
 	
 	nr = fread(contents, 1, fsz, f);
 
-	jl = tokenize_string(contents, fsz);
-	
+	jf = json_read_file(contents, fsz);
+		
 	free(contents);
+	
+	return jf;
+}
+
+struct json_file* json_read_file(char* source, size_t len) {
+	struct json_lexer* jl;
+	struct json_parser* jp;
+	struct json_file* jf;
+	
+	jl = tokenize_string(source, len);
 	
 	if(!jl) return NULL;
 	
 	jp = parse_token_stream(jl);
+	
+	jf = calloc(1, sizeof(*jf));
+	if(!jf) return NULL;
+	
+	jf->root = jp->stack + 1;
 
 	return jp->stack + 1;
 }
