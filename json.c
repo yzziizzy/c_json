@@ -105,50 +105,56 @@ struct json_array* json_array_create() {
 
 
 // pushes the tail
-int json_array_push_tail(struct json_array* arr, struct json_value* val) {
+int json_array_push_tail(struct json_value* arr, struct json_value* val) {
 
+	struct json_array* a;
 	struct json_array_node* node;
+	
+	a = arr->v.arr;
 	
 	node = malloc(sizeof(*node));
 	if(!node) return 1;
 	
 	node->next = NULL;
-	node->prev = arr->tail;
+	node->prev = a->tail;
 	node->value = val;
 	
-	if(arr->length == 0) {
-		arr->head = node;
+	if(a->length == 0) {
+		a->head = node;
 	}
 	else {
-		arr->tail->next = node;
+		a->tail->next = node;
 	}
 	
-	arr->tail = node;
-	arr->length++;
+	a->tail = node;
+	a->length++;
 	
 	return 0;
 }
 
 // pops the tail
-int json_array_pop_tail(struct json_array* arr, struct json_value** val) {
+int json_array_pop_tail(struct json_value* arr, struct json_value** val) {
 
+	struct json_array* a;
 	struct json_array_node* t;
 	
-	if(arr->length == 0) {
+	a = arr->v.arr;
+	
+	if(a->length == 0) {
 		return 1;
 	}
 	
-	arr->length--;
+	a->length--;
 	
-	*val = arr->tail->value;
+	*val = a->tail->value;
 	
-	if(arr->length > 0) {
-		t = arr->tail;
-		arr->tail = arr->tail->prev;
-		arr->tail->next = NULL;
+	if(a->length > 0) {
+		t = a->tail;
+		a->tail = a->tail->prev;
+		a->tail->next = NULL;
 	}
 	else {
-		arr->head = arr->tail = NULL;
+		a->head = a->tail = NULL;
 	}
 	
 	free(t);
@@ -251,35 +257,41 @@ static int json_obj_resize(struct json_obj* obj, int newSize) {
 // TODO: better return values and missing key handling
 // returns 0 if val is set to the value
 // *val == NULL && return 0  means the key was not found;
-int json_obj_get_key(struct json_obj* obj, char* key, struct json_value** val) {
+int json_obj_get_key(struct json_value* obj, char* key, struct json_value** val) {
 	uint64_t hash;
 	size_t bi;
+	struct json_obj* o;
+	
+	o = obj->v.obj;
 	
 	hash = hash_key(key, -1);
 	
-	bi = find_bucket(obj, hash, key);
+	bi = find_bucket(o, hash, key);
 	if(bi < 0) return 1;
 	
-	*val = obj->buckets[bi].value; 
+	*val = o->buckets[bi].value; 
 	return 0;
 }
 
 // zero for success
-int json_obj_set_key(struct json_obj* obj, char* key, struct json_value* val) {
+int json_obj_set_key(struct json_value* obj, char* key, struct json_value* val) {
 	uint64_t hash;
 	size_t bi;
+	struct json_obj* o;
+	
+	o = obj->v.obj;
 	
 	// check size and grow if necessary
-	if(obj->fill / obj->alloc_size >= 0.75) {
-		json_obj_resize(obj, obj->alloc_size * 2);
+	if(o->fill / o->alloc_size >= 0.75) {
+		json_obj_resize(o, o->alloc_size * 2);
 	}
 	
 	hash = hash_key(key, -1);
 	
-	bi = find_bucket(obj, hash, key);
+	bi = find_bucket(o, hash, key);
 	if(bi < 0) return 1;
 	
-	obj->buckets[bi].value = val;
+	o->buckets[bi].value = val;
 	
 	return 0;
 }
@@ -919,7 +931,7 @@ static void reduce_array(struct json_parser* jp) {
 		return;
 	}
 	// append v to arr
-	json_array_push_tail(arr->v.arr, v);
+	json_array_push_tail(arr, v);
 	
 	jp->stack_cnt--;
 }
@@ -959,7 +971,7 @@ static void reduce_object(struct json_parser* jp) {
 	}
 	
 	// insert l:v into obj
-	json_obj_set_key(obj->v.obj, l->v.str, v);
+	json_obj_set_key(obj, l->v.str, v);
 	// BUG? free label value?
 	
 	jp->stack_cnt -= 2;
@@ -1243,82 +1255,35 @@ struct json_file* json_read_file(FILE* f) {
 	
 	nr = fread(contents, 1, fsz, f);
 
-	jf = json_read_file(contents, fsz);
+	jf = json_parse_string(contents, fsz);
 		
 	free(contents);
 	
 	return jf;
 }
 
-struct json_file* json_read_file(char* source, size_t len) {
+struct json_file* json_parse_string(char* source, size_t len) {
 	struct json_lexer* jl;
 	struct json_parser* jp;
 	struct json_file* jf;
+	
+	jf = calloc(1, sizeof(*jf));
+	if(!jf) return NULL;
 	
 	jl = tokenize_string(source, len);
 	
 	if(!jl) return NULL;
 	
 	jp = parse_token_stream(jl);
-	
-	jf = calloc(1, sizeof(*jf));
-	if(!jf) return NULL;
-	
+	if(!jp) {
+		
+	}
+
 	jf->root = jp->stack + 1;
 
 	return jp->stack + 1;
 }
 
-int main(int argc, char* argv[]) {
-	FILE* f;
-	size_t fsz;
-	char* contents, *txt;
-	int nr;
-	struct json_file* jf;
-	
-	jf = json_load_path(argv[1]);
-// 	f = fopen(argv[1], "rb");
-// 	if(!f) {
-// 		printf("no such file\n");
-// 		return 1;
-// 	}
-// 	
-// 	fseek(f, 0, SEEK_END);
-// 	
-// 	fsz = ftell(f);
-// 	dbg_printf("file size: %d\n", (int)fsz);
-// 	
-// 	fseek(f, 0, SEEK_SET);
-// 	
-// 	txt = contents = malloc(fsz+1);
-// 	txt[fsz] = 0; // some crt functions might read past the end otherwise
-// 	
-// 	nr = fread(contents, 1, fsz, f);
-// 	dbg_printf("bytes read: %d\n", nr);
-// 	fclose(f);
-// 	
-// 	struct json_lexer* jl = tokenize_string(txt, fsz);
-// 	
-// 	struct token* ts = jl->token_stream;
-// 	
-// #define tc(x, y, z) case x: printf(#x ": " y "\n", z); break;
-// #define tcl(x) case x: printf(#x "\n"); break;
-// 	printf("%d,%d\n", jl->ts_cnt, jl->ts_alloc);
-// 	//exit(1);
-// 	int i;
-// 	for(i = 0; i < jl->ts_cnt; i++, ts++) {
-// 		dbg_print_token(ts);
-// 	}
-// 	
-// 	printf("\n----------------\n\n");
-// 	
-// 	parse_token_stream(jl);
-// 	
-// 	free(contents);
-// 	
-// 	
-	return 0;
-}
 
 
 #define tc(x, y, z) case x: printf(#x ": " y "\n", z); break;
