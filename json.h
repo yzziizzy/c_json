@@ -21,6 +21,7 @@ struct json_obj;
 struct json_array;
 
 
+
 JSON_TYPEDEF enum json_type {
 	JSON_TYPE_UNDEFINED = 0,
 	JSON_TYPE_NULL,
@@ -121,7 +122,7 @@ int json_as_int(struct json_value* v, int64_t* out);
 int json_as_double(struct json_value* v, double* out);
 int json_as_string(struct json_value* v, char** out);
 
-#define JSON_UNPACK(t, f, type) #f, t, offsetof((t)->f), type
+#define JSON_UNPACK(t, f, type) #f, t, offsetof(t, f), type
 int json_obj_unpack_struct(struct json_value* obj, ...);
 
 
@@ -144,6 +145,6 @@ struct json_file* json_parse_string(char* source, size_t len);
 char* json_get_type_str(enum json_type t); 
 char* json_get_err_str(enum json_error e);
 
-
+void json_dump_value(struct json_value* root, int cur_depth, int max_depth);
 
 #endif // JSON__JSON_H__INCLUDED
