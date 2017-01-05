@@ -1,4 +1,8 @@
+#ifndef JSON__JSON_H__INCLUDED
+#define JSON__JSON_H__INCLUDED
 
+
+#include <stdarg.h>
 
 #define dbg_printf printf
 
@@ -26,8 +30,23 @@ JSON_TYPEDEF enum json_type {
 	JSON_TYPE_OBJ,
 	JSON_TYPE_ARRAY,
 	JSON_TYPE_COMMENT_SINGLE,
-	JSON_TYPE_COMMENT_MULTI
+	JSON_TYPE_COMMENT_MULTI,
+	
+	// only used for unpacking to structs
+	JSON_TYPE_FLOAT,
+	JSON_TYPE_INT8,
+	JSON_TYPE_INT16,
+	JSON_TYPE_INT32,
+	JSON_TYPE_INT64,
+	JSON_TYPE_UINT8,
+	JSON_TYPE_UINT16,
+	JSON_TYPE_UINT32,
+	JSON_TYPE_UINT64,
+	
+	JSON_TYPE_MAXVALUE
 } JSON_TD(json_type_e);
+
+#define JSON__type_enum_tail JSON_TYPE_MAXVALUE
 
 JSON_TYPEDEF enum json_error {
 	
@@ -42,7 +61,9 @@ JSON_TYPEDEF enum json_error {
 	
 	JSON_PARSER_ERROR_CORRUPT_STACK,
 	JSON_PARSER_ERROR_STACK_EXHAUSTED,
-	JSON_PARSER_ERROR_UNEXPECTED_EOI
+	JSON_PARSER_ERROR_UNEXPECTED_EOI,
+	
+	JSON_ERROR_MAXVALUE
 } JSON_TD(json_error_e);
 
 JSON_TYPEDEF struct json_value {
@@ -95,6 +116,16 @@ JSON_TYPEDEF struct json_file {
 } JSON_TD(json_file_t);
 
 
+int json_as_type(struct json_value* v, enum json_type t, void* out); 
+int json_as_int(struct json_value* v, int64_t* out); 
+int json_as_double(struct json_value* v, double* out);
+int json_as_string(struct json_value* v, char** out);
+
+#define JSON_UNPACK(t, f, type) #f, t, offsetof((t)->f), type
+int json_obj_unpack_struct(struct json_value* obj, ...);
+
+
+
 
 struct json_array* json_array_create();
 int json_array_push_tail(struct json_value* arr, struct json_value* val);
@@ -112,3 +143,7 @@ struct json_file* json_parse_string(char* source, size_t len);
 
 char* json_get_type_str(enum json_type t); 
 char* json_get_err_str(enum json_error e);
+
+
+
+#endif // JSON__JSON_H__INCLUDED

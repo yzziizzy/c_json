@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdarg.h>
 
 #include "json.h"
 
@@ -256,7 +257,7 @@ static int json_obj_resize(struct json_obj* obj, int newSize) {
 
 // TODO: better return values and missing key handling
 // returns 0 if val is set to the value
-// *val == NULL && return 0  means the key was not found;
+// *val == NULL && return > 0 means the key was not found;
 int json_obj_get_key(struct json_value* obj, char* key, struct json_value** val) {
 	uint64_t hash;
 	size_t bi;
@@ -295,6 +296,257 @@ int json_obj_set_key(struct json_value* obj, char* key, struct json_value* val) 
 	
 	return 0;
 }
+
+/* key, target, offset, type */
+// returns number of values filled
+int json_obj_unpack_struct(struct json_value* obj, ...) {
+	int i, count, ret, filled;
+	char* key;
+	void* target;
+	size_t offset;
+	enum json_type type;
+	struct json_value* v;
+	va_list ap;
+	
+	
+	if(obj->type != JSON_TYPE_OBJ) return 0; 
+
+	filled = 0;
+	
+	va_start(ap, obj);
+	for(i = 0; i < count; i++) {
+		key = va_arg(ap, char*); 
+		target = va_arg(ap, void*); 
+		offset = va_arg(ap, size_t); 
+		type = va_arg(ap, enum json_type); 
+		
+		ret = json_obj_get_key(obj, key, &v);
+		if(ret > 0) continue;
+		
+		if(!json_as_type(v, type, target + offset)) filled++;
+	}
+	va_end(ap);
+	
+	return filled;
+}
+
+
+/*
+type coercion rules:
+undefined/null -> int = 0
+numbers, as you would expect, according to C type conversion rules
+obj/array -> number/string = error
+string/comment -> string = string
+number -> string = sprintf, accoding to some nice rules.
+string -> number = strtod/i
+
+JSON_TYPE_INT is assumed to be C int
+
+numbers over 2^63 are not properly supported yet. they will be truncated to 0
+*/
+
+// returns 0 if successful
+int json_as_type(struct json_value* v, enum json_type t, void* out) { 
+	int ret;
+	int64_t i;
+	double d;
+	
+	if(!v) return 1;
+	
+	switch(t) { // actual type
+
+		case JSON_TYPE_INT:
+			ret = json_as_int(v, &i);
+			if(!ret) *((int*)out) = i;
+			return 0;
+			
+		case JSON_TYPE_DOUBLE: return json_as_double(v, out);
+		case JSON_TYPE_STRING: return json_as_string(v, out);
+		
+		case JSON_TYPE_OBJ: *((struct json_obj**)out) = v->v.obj; return 0;
+		case JSON_TYPE_ARRAY: *((struct json_array**)out) = v->v.arr; return 0;
+
+			
+		case JSON_TYPE_FLOAT:
+			ret = json_as_double(v, &d);
+			if(!ret) *((float*)out) = d;
+			return ret;
+			
+		case JSON_TYPE_INT8:
+			ret = json_as_int(v, &i);
+			if(!ret) *((int8_t*)out) = i;
+			return ret;
+			
+		case JSON_TYPE_INT16:
+			ret = json_as_int(v, &i);
+			if(!ret) *((int16_t*)out) = i;
+			return ret;
+			
+		case JSON_TYPE_INT32: 
+			ret = json_as_int(v, &i);
+			if(!ret) *((int32_t*)out) = i;
+			return ret;
+			
+		case JSON_TYPE_INT64: return json_as_double(v, out);
+		
+		case JSON_TYPE_UINT8:
+			ret = json_as_int(v, &i);
+			if(!ret) *((uint8_t*)out) = i;
+			return ret;
+			
+		case JSON_TYPE_UINT16:
+			ret = json_as_int(v, &i);
+			if(!ret) *((uint16_t*)out) = i;
+			return ret;
+			
+		case JSON_TYPE_UINT32: 
+			ret = json_as_int(v, &i);
+			if(!ret) *((uint32_t*)out) = i;
+			return ret;
+			
+		case JSON_TYPE_UINT64: 
+			ret = json_as_int(v, &i);
+			if(!ret) *((uint64_t*)out) = i;
+			return ret;
+			
+		case JSON_TYPE_UNDEFINED:
+		case JSON_TYPE_NULL:
+		case JSON_TYPE_COMMENT_SINGLE:
+		case JSON_TYPE_COMMENT_MULTI:
+		default:
+			return 1;
+	}
+	
+	
+	
+}
+
+// returns 0 for success
+int json_as_int(struct json_value* v, int64_t* out) {
+	switch(v->type) { // actual type
+		case JSON_TYPE_UNDEFINED:
+		case JSON_TYPE_NULL:
+			*out = 0;
+			return 0;
+			
+		case JSON_TYPE_INT:
+			*out = v->v.integer;
+			return 0;
+			
+		case JSON_TYPE_DOUBLE:
+			*out = v->v.dbl;
+			return 0;
+			
+		case JSON_TYPE_STRING:
+			*out = strtol(v->v.str, NULL, 0);
+			return 0;
+			
+		case JSON_TYPE_OBJ:
+		case JSON_TYPE_ARRAY:
+		case JSON_TYPE_COMMENT_SINGLE:
+		case JSON_TYPE_COMMENT_MULTI:
+		default:
+			*out = 0;
+			return 1;
+	}
+}
+
+// returns 0 for success
+int json_as_double(struct json_value* v, double* out) {
+	switch(v->type) { // actual type
+		case JSON_TYPE_UNDEFINED:
+		case JSON_TYPE_NULL:
+			*out = 0.0;
+			return 0;
+			
+		case JSON_TYPE_INT:
+			*out = v->v.integer;
+			return 0;
+			
+		case JSON_TYPE_DOUBLE:
+			*out = v->v.dbl;
+			return 0;
+			
+		case JSON_TYPE_STRING:
+			*out = strtod(v->v.str, NULL);
+			return 0;
+			
+		case JSON_TYPE_OBJ:
+		case JSON_TYPE_ARRAY:
+		case JSON_TYPE_COMMENT_SINGLE:
+		case JSON_TYPE_COMMENT_MULTI:
+		default:
+			*out = 0.0;
+			return 1;
+	}
+}
+
+// alloc some space first
+static char* asprintf(char* fmt, ...) {
+	va_list args;
+	char* buf;
+	size_t len;
+	int n;
+	
+	va_start(args, fmt);
+	
+	len = vsnprintf(NULL, 0, fmt, args);
+	buf = malloc(len + 1);
+	if(!buf) return NULL;
+	
+	vsnprintf(buf, len, fmt, args);
+	
+	va_end (args);
+	
+	return buf;
+}
+
+
+// returns 0 for success
+int json_as_string(struct json_value* v, char** out) {
+	char* buf;
+	size_t len;
+	
+	switch(v->type) { // actual type
+		case JSON_TYPE_UNDEFINED:
+			*out = "undefined";
+			return 0;
+			
+		case JSON_TYPE_NULL:
+			*out = "null";
+			return 0;
+			
+		case JSON_TYPE_INT:
+			*out = asprintf("%d", v->v.integer);
+			return 0;
+			
+		case JSON_TYPE_DOUBLE:
+			*out = asprintf("%f", v->v.dbl);
+			return 0;
+			
+		case JSON_TYPE_COMMENT_SINGLE:
+		case JSON_TYPE_COMMENT_MULTI:
+		case JSON_TYPE_STRING:
+			*out = v->v.str;
+			return 0;
+			
+		case JSON_TYPE_OBJ:
+			*out = "[Object]";
+			return 0;
+			
+		case JSON_TYPE_ARRAY:
+			*out = "[Array]";
+			return 0;
+		
+		default:
+			*out = "";
+			return 1;
+	}
+}
+
+
+
+
 
 
 #define check_oom(x) \
@@ -1297,7 +1549,7 @@ static void dbg_print_token(struct token* ts) {
 		tcl(TOKEN_OBJ_START)
 		tcl(TOKEN_OBJ_END)
 		tc(TOKEN_STRING, "%s", ts->val->v.str)
-		tc(TOKEN_NUMBER, "%d", ts->val->v.integer)
+		tc(TOKEN_NUMBER, "%d", (int)ts->val->v.integer)
 		tcl(TOKEN_NULL)
 		tcl(TOKEN_INFINITY)
 		tcl(TOKEN_UNDEFINED)
@@ -1327,11 +1579,11 @@ static void dbg_print_value(struct json_value* v) {
 	switch(v->type) {
 		case JSON_TYPE_UNDEFINED: printf("undefined\n"); break;
 		case JSON_TYPE_NULL: printf("null\n"); break;
-		case JSON_TYPE_INT: printf("int: %d\n", v->v.integer); break;
+		case JSON_TYPE_INT: printf("int: %d\n", (int)v->v.integer); break;
 		case JSON_TYPE_DOUBLE: printf("double %f\n", v->v.dbl); break;
 		case JSON_TYPE_STRING: printf("string: \"%s\"\n", v->v.str); break;
-		case JSON_TYPE_OBJ: printf("object [%d]\n", v->v.obj->fill); break;
-		case JSON_TYPE_ARRAY: printf("array [%d]\n", v->v.arr->length); break;
+		case JSON_TYPE_OBJ: printf("object [%d]\n", (int)v->v.obj->fill); break;
+		case JSON_TYPE_ARRAY: printf("array [%d]\n", (int)v->v.arr->length); break;
 		case JSON_TYPE_COMMENT_SINGLE: printf("comment, single\n"); break;
 		case JSON_TYPE_COMMENT_MULTI: printf("comment, multiline\n"); break;
 	}
