@@ -301,6 +301,43 @@ int json_obj_set_key(struct json_value* obj, char* key, struct json_value* val) 
 	return 0;
 }
 
+
+// iteration. no order. results undefined if modified while iterating
+// returns 0 when there is none left
+// set iter to NULL to start
+static int json_obj_next(struct json_value* val, void** iter, char** key, void** value) { 
+	struct json_obj_field* b = *iter;
+	struct json_obj* obj;
+	
+	if(val->type != JSON_TYPE_OBJ) return 1;
+	obj = val->v.obj;
+	
+	if(obj->fill == 0) {
+		return 0;
+	}
+	
+	// a tiny bit of idiot-proofing
+	if(b == NULL) b = &obj->buckets[-1];
+	//printf("alloc size: %d\n", obj->alloc_size);
+	do {
+		b++;
+		if(b >= obj->buckets + obj->alloc_size) {
+			//printf("ending next\n");
+			// end of the list
+			*value = NULL;
+			*key = NULL;
+			return 0;
+		}
+	} while(!b->key);
+	
+	*key = b->key;
+	*value = b->value;
+	*iter = b;
+	
+	return 1;
+}
+
+
 /* key, target, offset, type */
 // returns number of values filled
 int json_obj_unpack_struct(struct json_value* obj, ...) {
@@ -1658,37 +1695,6 @@ char* json_get_err_str(enum json_error e) {
 
 
 
-// iteration. no order. results undefined if modified while iterating
-// returns 0 when there is none left
-// set iter to NULL to start
-static int _HT_next(struct json_obj* obj, void** iter, char** key, void** value) { 
-	struct json_obj_field* b = *iter;
-	
-	if(obj->fill == 0) {
-		return 0;
-	}
-	
-	// a tiny bit of idiot-proofing
-	if(b == NULL) b = &obj->buckets[-1];
-	//printf("alloc size: %d\n", obj->alloc_size);
-	do {
-		b++;
-		if(b >= obj->buckets + obj->alloc_size) {
-			//printf("ending next\n");
-			// end of the list
-			*value = NULL;
-			*key = NULL;
-			return 0;
-		}
-	} while(!b->key);
-	
-	*key = b->key;
-	*value = b->value;
-	*iter = b;
-	
-	return 1;
-}
-
 void spaces(int depth, int w) {
 	int i;
 	for(i = 0; i < depth * w; i++) putchar(' ');
@@ -1717,7 +1723,7 @@ void json_dump_value(struct json_value* root, int cur_depth, int max_depth) {
 		
 		// do shit
 		iter = NULL;
-		while(_HT_next(root->v.obj, &iter, &key, &v)) {
+		while(json_obj_next(root, &iter, &key, &v)) {
 			//printf("looping\n;");
 			spaces(cur_depth, 4);
 			printf("%s: ", key);
