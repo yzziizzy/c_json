@@ -305,7 +305,7 @@ int json_obj_set_key(struct json_value* obj, char* key, struct json_value* val) 
 // iteration. no order. results undefined if modified while iterating
 // returns 0 when there is none left
 // set iter to NULL to start
-static int json_obj_next(struct json_value* val, void** iter, char** key, void** value) { 
+int json_obj_next(struct json_value* val, void** iter, char** key, struct json_value** value) { 
 	struct json_obj_field* b = *iter;
 	struct json_obj* obj;
 	
@@ -369,6 +369,53 @@ int json_obj_unpack_struct(struct json_value* obj, ...) {
 	va_end(ap);
 	
 	return filled;
+}
+
+/*
+returns an array of char* pairs, key then value
+*/
+int json_obj_unpack_string_array(struct json_value* obj, char*** out, size_t* len) {
+	char** a;
+	size_t l, i;
+	
+	int ret;
+	struct json_obj* o;
+	void* iter;
+	char* key;
+	struct json_value* v;
+	
+
+	
+	
+	// TODO: error handling
+	if(obj->type != JSON_TYPE_OBJ) {
+		return 1;
+	}
+	o = obj->v.obj;
+	
+	l = o->fill;
+	if(l <= 0) {
+		return 2;
+	}
+	
+	a = malloc(l * 2 * sizeof(*a));
+	if(!a) {
+		return 3;
+	}
+	
+	// do shit
+	i = 0;
+	iter = NULL;
+	while(json_obj_next(obj, &iter, &key, &v)) {
+		a[i++] = key; // todo: strdup?
+		ret = json_as_string(v, &a[i++]);
+		// TODO: handle errors here
+	}
+	
+	*out = a;
+	*len = l;
+	
+	return 0;
 }
 
 
@@ -586,6 +633,9 @@ int json_as_string(struct json_value* v, char** out) {
 }
 
 
+int json_as_float(struct json_value* v, float* f) {
+	return json_as_type(v, JSON_TYPE_FLOAT, f); 
+}
 
 
 
