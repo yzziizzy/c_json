@@ -4,7 +4,9 @@
 
 #include <stdarg.h>
 
-#define dbg_printf printf
+static void nothin(char* x, ...) {};
+
+#define dbg_printf nothin 
 
 // the parser currently does not handle comments.
 #define JSON_DISCARD_COMMENTS 1
@@ -123,7 +125,7 @@ int json_as_double(struct json_value* v, double* out);
 int json_as_string(struct json_value* v, char** out);
 int json_as_float(struct json_value* v, float* f);
 
-#define JSON_UNPACK(t, f, type) #f, t, offsetof(t, f), type
+#define JSON_UNPACK(t, f, type) #f, (t), (void*)(&((t)->f)) - (void*)(t), type
 int json_obj_unpack_struct(struct json_value* obj, ...);
 int json_obj_unpack_string_array(struct json_value* obj, char*** out, size_t* len);
 
