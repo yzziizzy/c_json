@@ -357,6 +357,7 @@ int json_obj_unpack_struct(struct json_value* obj, ...) {
 	va_start(ap, obj);
 	for(i = 0; i < count; i++) {
 		key = va_arg(ap, char*); 
+		if(!key) break;
 		target = va_arg(ap, void*); 
 		offset = va_arg(ap, size_t); 
 		type = va_arg(ap, enum json_type); 
@@ -761,9 +762,7 @@ static int lex_string_token(struct json_lexer* jl) {
 	int lines = 0;
 	int char_num = jl->char_num;
 	
-	dbg_printf("string \n");
-	//printf("\n\ndelim %c\n", delim);
-	//printf("error: %d\n", jl->error);
+
 	// find len, count lines
 	while(1) {
 		if(*se == delim) break;
@@ -824,8 +823,6 @@ static int lex_number_token(struct json_lexer* jl) {
 	int is_float = 0;
 	int negate =0;
 	int base;
-	
-	dbg_printf("number \n");
 	
 	start = jl->head;
 	
@@ -898,7 +895,6 @@ static int lex_label_token(struct json_lexer* jl) {
 	
 	int char_num = jl->char_num;
 
-	dbg_printf("label \n");
 	//printf("error: %d\n", jl->error);
 	// find len, count lines
 	while(1) {
@@ -957,8 +953,6 @@ static int lex_comment_token(struct json_lexer* jl) {
 	size_t len;
 	int lines, char_num;
 	struct json_value* val;
-	
-	dbg_printf("comment \n");
 	
 	lex_next_char(jl);
 	
@@ -1136,7 +1130,7 @@ static struct json_lexer* tokenize_string(char* source, size_t len) {
 }
 
 static int parser_indent_level = 0;
-static void dbg_parser_indent() {
+static void dbg_parser_indent() { return;
 	int i;
 	for(i = 0; i < parser_indent_level; i++) {
 		dbg_printf("    ");
@@ -1742,7 +1736,7 @@ char* json_get_err_str(enum json_error e) {
 
 
 
-void spaces(int depth, int w) {
+void spaces(int depth, int w) { return;
 	int i;
 	for(i = 0; i < depth * w; i++) putchar(' ');
 }
@@ -1758,32 +1752,32 @@ void json_dump_value(struct json_value* root, int cur_depth, int max_depth) {
 	
 	if(root->type == JSON_TYPE_ARRAY) {
 		spaces(cur_depth, 4);
-		printf("[\n");
+		dbg_printf("[\n");
 		
 		// do shit
 		
 		spaces(cur_depth, 4);
-		printf("]\n");
+		dbg_printf("]\n");
 	}
 	else if(root->type == JSON_TYPE_OBJ) {
-		printf("{\n");
+		dbg_printf("{\n");
 		
 		// do shit
 		iter = NULL;
 		while(json_obj_next(root, &iter, &key, &v)) {
 			//printf("looping\n;");
 			spaces(cur_depth, 4);
-			printf("%s: ", key);
+			dbg_printf("%s: ", key);
 			json_dump_value(v, cur_depth+1, max_depth);
 		}
 		
 		spaces(cur_depth, 4);
-		printf("}\n");
+		dbg_printf("}\n");
 	}
 	else {
 		//printf("here");
 		dbg_print_value(root);
-		printf("\n");
+		dbg_printf("\n");
 	}
 	
 	
