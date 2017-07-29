@@ -761,7 +761,7 @@ static int lex_string_token(struct json_lexer* jl) {
 	int lines = 0;
 	int char_num = jl->char_num;
 	
-	printf("string \n");
+	dbg_printf("string \n");
 	//printf("\n\ndelim %c\n", delim);
 	//printf("error: %d\n", jl->error);
 	// find len, count lines
@@ -825,7 +825,7 @@ static int lex_number_token(struct json_lexer* jl) {
 	int negate =0;
 	int base;
 	
-	printf("number \n");
+	dbg_printf("number \n");
 	
 	start = jl->head;
 	
@@ -898,7 +898,7 @@ static int lex_label_token(struct json_lexer* jl) {
 	
 	int char_num = jl->char_num;
 
-	printf("label \n");
+	dbg_printf("label \n");
 	//printf("error: %d\n", jl->error);
 	// find len, count lines
 	while(1) {
@@ -958,7 +958,7 @@ static int lex_comment_token(struct json_lexer* jl) {
 	int lines, char_num;
 	struct json_value* val;
 	
-	printf("comment \n");
+	dbg_printf("comment \n");
 	
 	lex_next_char(jl);
 	
@@ -1139,10 +1139,7 @@ static int parser_indent_level = 0;
 static void dbg_parser_indent() {
 	int i;
 	for(i = 0; i < parser_indent_level; i++) {
-		putchar(' ');
-		putchar(' ');
-		putchar(' ');
-		putchar(' ');
+		dbg_printf("    ");
 	}
 }
 
@@ -1234,7 +1231,7 @@ static inline struct token* consume_token(struct json_parser* jp) {
 	}
 	
 	dbg_parser_indent();
-	printf("ct-%d-", jp->cur_token[1].line_num); dbg_print_token(jp->cur_token + 1);
+	dbg_printf("ct-%d-", jp->cur_token[1].line_num); dbg_print_token(jp->cur_token + 1);
 	
 	return ++jp->cur_token;
 }
@@ -1640,15 +1637,15 @@ struct json_file* json_parse_string(char* source, size_t len) {
 	}
 
 	jf->root = jp->stack[1];
-	json_dump_value(*jp->stack, 0, 10);
-	json_dump_value(jf->root, 0, 10);
+	//json_dump_value(*jp->stack, 0, 10);
+	//json_dump_value(jf->root, 0, 10);
 	return jf;
 }
 
 
 
-#define tc(x, y, z) case x: printf(#x ": " y "\n", z); break;
-#define tcl(x) case x: printf(#x "\n"); break;
+#define tc(x, y, z) case x: dbg_printf(#x ": " y "\n", z); break;
+#define tcl(x) case x: dbg_printf(#x "\n"); break;
 
 static void dbg_print_token(struct token* ts) {
 	switch(ts->tokenType) {
@@ -1673,30 +1670,30 @@ static void dbg_print_token(struct token* ts) {
 
 static void dbg_print_value(struct json_value* v) {
 	if(v == ROOT_VALUE) {
-		printf("ROOT_VALUE sentinel\n");
+		dbg_printf("ROOT_VALUE sentinel\n");
 		return;
 	}
 	if(v == RESUME_ARRAY) {
-		printf("RESUME_ARRAY sentinel\n");
+		dbg_printf("RESUME_ARRAY sentinel\n");
 		return;
 	}
 	if(v == RESUME_OBJ) {
-		printf("RESUME_OBJ sentinel\n");
+		dbg_printf("RESUME_OBJ sentinel\n");
 		return;
 	}
 	
 	switch(v->type) {
-		case JSON_TYPE_UNDEFINED: printf("undefined\n"); break;
-		case JSON_TYPE_NULL: printf("null\n"); break;
-		case JSON_TYPE_INT: printf("int: %d\n", (int)v->v.integer); break;
-		case JSON_TYPE_DOUBLE: printf("double %f\n", v->v.dbl); break;
-		case JSON_TYPE_STRING: printf("string: \"%s\"\n", v->v.str); break;
-		case JSON_TYPE_OBJ: printf("object [%d]\n", (int)v->v.obj->fill); break;
-		case JSON_TYPE_ARRAY: printf("array [%d]\n", (int)v->v.arr->length); break;
-		case JSON_TYPE_COMMENT_SINGLE: printf("comment, single\n"); break;
-		case JSON_TYPE_COMMENT_MULTI: printf("comment, multiline\n"); break;
+		case JSON_TYPE_UNDEFINED: dbg_printf("undefined\n"); break;
+		case JSON_TYPE_NULL: dbg_printf("null\n"); break;
+		case JSON_TYPE_INT: dbg_printf("int: %d\n", (int)v->v.integer); break;
+		case JSON_TYPE_DOUBLE: dbg_printf("double %f\n", v->v.dbl); break;
+		case JSON_TYPE_STRING: dbg_printf("string: \"%s\"\n", v->v.str); break;
+		case JSON_TYPE_OBJ: dbg_printf("object [%d]\n", (int)v->v.obj->fill); break;
+		case JSON_TYPE_ARRAY: dbg_printf("array [%d]\n", (int)v->v.arr->length); break;
+		case JSON_TYPE_COMMENT_SINGLE: dbg_printf("comment, single\n"); break;
+		case JSON_TYPE_COMMENT_MULTI: dbg_printf("comment, multiline\n"); break;
 		default: 
-			printf("unknown enum: %d\n", v->type);
+			dbg_printf("unknown enum: %d\n", v->type);
 	}
 }
 
@@ -1705,7 +1702,7 @@ static void dbg_dump_stack(struct json_parser* jp, int depth) {
 	return;
 	for(i = 0; i < depth && i < jp->stack_cnt; i++) {
 		dbg_parser_indent();
-		printf("%d: ", i);
+		dbg_printf("%d: ", i);
 		dbg_print_value(jp->stack[jp->stack_cnt - i - 1]);
 	}
 }

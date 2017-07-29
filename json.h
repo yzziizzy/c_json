@@ -4,7 +4,8 @@
 
 #include <stdarg.h>
 
-#define dbg_printf printf
+//#define dbg_printf(args...) printf(args)
+#define dbg_printf(args...) 
 
 // the parser currently does not handle comments.
 #define JSON_DISCARD_COMMENTS 1
