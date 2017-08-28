@@ -140,6 +140,7 @@ int json_obj_unpack_string_array(struct json_value* obj, char*** out, size_t* le
 struct json_array* json_array_create();
 int json_array_push_tail(struct json_value* arr, struct json_value* val);
 int json_array_pop_tail(struct json_value* arr, struct json_value** val);
+size_t json_array_length(struct json_value* arr);
 
 struct json_obj* json_obj_create(size_t initial_alloc_size);
 int json_obj_get_key(struct json_value* obj, char* key, struct json_value** val);

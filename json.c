@@ -163,6 +163,25 @@ int json_array_pop_tail(struct json_value* arr, struct json_value** val) {
 	return 0;
 }
 
+
+size_t json_array_length(struct json_value* arr) {
+	size_t len;
+	struct json_array_node* n;
+	
+	if(arr->type != JSON_TYPE_ARRAY) {
+		return 0;
+	}
+	
+	n = arr->v.arr->head;
+	while(n) {
+		len++;
+		n = n->next;
+	}
+	
+	return len;
+}
+
+
 struct json_obj* json_obj_create(size_t initial_alloc_size) {
 	
 	struct json_obj* obj;
@@ -1627,7 +1646,8 @@ struct json_file* json_parse_string(char* source, size_t len) {
 	
 	jp = parse_token_stream(jl);
 	if(!jp) {
-		
+		printf("JSON: failed to parse token stream\n");
+		return NULL;
 	}
 
 	jf->root = jp->stack[1];
