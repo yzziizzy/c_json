@@ -3,15 +3,17 @@
 
 
 #include <stdarg.h>
+#include <stdint.h>
 
+//#define JSON_DEBUG
 
-//#define dbg_printf(args...) printf(args)
-#define dbg_printf(args...) 
-
-static void nothin(char* x, ...) {};
-
-#define dbg_printf nothin 
-
+#ifdef JSON_DEBUG
+	#define dbg_printf(args...) printf(args)
+#else
+	#define dbg_printf(args...) 
+	static void nothin(char* x, ...) {};
+	#define dbg_printf nothin 
+#endif
 
 // the parser currently does not handle comments.
 #define JSON_DISCARD_COMMENTS 1

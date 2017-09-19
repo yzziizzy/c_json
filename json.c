@@ -172,6 +172,7 @@ size_t json_array_length(struct json_value* arr) {
 		return 0;
 	}
 	
+	len = 0;
 	n = arr->v.arr->head;
 	while(n) {
 		len++;
@@ -213,8 +214,8 @@ static uint64_t hash_key(char* key, size_t len) {
 	return hash[0];
 }
 
-static size_t find_bucket(struct json_obj* obj, uint64_t hash, char* key) {
-	size_t startBucket, bi;
+static int64_t find_bucket(struct json_obj* obj, uint64_t hash, char* key) {
+	int64_t startBucket, bi;
 	
 	bi = startBucket = hash % obj->alloc_size; 
 	
@@ -240,6 +241,7 @@ static size_t find_bucket(struct json_obj* obj, uint64_t hash, char* key) {
 		bi = (bi + 1) % obj->alloc_size;
 	} while(bi != startBucket);
 	
+	printf("CJSON: error in find_bucket\n");
 	// should never reach here if the table is maintained properly
 	return -1;
 }
@@ -249,7 +251,8 @@ static size_t find_bucket(struct json_obj* obj, uint64_t hash, char* key) {
 static int json_obj_resize(struct json_obj* obj, int newSize) {
 	struct json_obj_field* old, *op;
 	size_t oldlen = obj->alloc_size;
-	size_t i, n, bi;
+	size_t i, n;
+	int64_t bi;
 	
 	old = op = obj->buckets;
 	
@@ -280,7 +283,7 @@ static int json_obj_resize(struct json_obj* obj, int newSize) {
 // *val == NULL && return > 0 means the key was not found;
 int json_obj_get_key(struct json_value* obj, char* key, struct json_value** val) {
 	uint64_t hash;
-	size_t bi;
+	int64_t bi;
 	struct json_obj* o;
 	
 	o = obj->v.obj;
@@ -288,7 +291,10 @@ int json_obj_get_key(struct json_value* obj, char* key, struct json_value** val)
 	hash = hash_key(key, -1);
 	
 	bi = find_bucket(o, hash, key);
-	if(bi < 0) return 1;
+	if(bi < 0 || o->buckets[bi].key == NULL) {
+		*val = NULL;
+		return 1;
+	}
 	
 	*val = o->buckets[bi].value; 
 	return 0;
@@ -297,7 +303,7 @@ int json_obj_get_key(struct json_value* obj, char* key, struct json_value** val)
 // zero for success
 int json_obj_set_key(struct json_value* obj, char* key, struct json_value* val) {
 	uint64_t hash;
-	size_t bi;
+	int64_t bi;
 	struct json_obj* o;
 	
 	o = obj->v.obj;
