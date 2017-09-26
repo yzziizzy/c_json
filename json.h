@@ -157,6 +157,8 @@ struct json_file* json_load_path(char* path);
 struct json_file* json_read_file(FILE* f);
 struct json_file* json_parse_string(char* source, size_t len);
 
+// recursive.
+void json_free(struct json_value* v);
 
 char* json_get_type_str(enum json_type t); 
 char* json_get_err_str(enum json_error e);

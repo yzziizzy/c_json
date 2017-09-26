@@ -1663,6 +1663,63 @@ struct json_file* json_parse_string(char* source, size_t len) {
 }
 
 
+static void free_array(struct json_array* arr) {
+	
+	struct json_array_node* n, *p;
+	
+	n = arr->head;
+	while(n) {
+		
+		json_free(n->value);
+		
+		p = n;
+		n = n->next;
+		
+		free(p);
+	}
+	
+	free(arr);
+}
+
+
+static void free_obj(struct json_obj* o) {
+	size_t freed = 0;
+	size_t i;
+	
+	for(i = 0; i < o->alloc_size && freed < o->fill; i++) {
+		struct json_obj_field* b;
+		
+		b = &o->buckets[i];
+		if(b->key == NULL) continue;
+		
+		json_free(b->value);
+		freed++;
+	}
+	
+	free(o->buckets);
+	free(o);
+}
+
+
+// must manage v's memory manually
+void json_free(struct json_value* v) {
+	if(!v) return;
+	
+	switch(v->type) {
+		case JSON_TYPE_STRING:
+			free(v->v.str);
+			break;
+		
+		case JSON_TYPE_OBJ:
+			free_obj(v->v.obj);
+			break;
+			
+		case JSON_TYPE_ARRAY:
+			free_array(v->v.arr);
+			break;
+	}
+}
+
 
 #define tc(x, y, z) case x: dbg_printf(#x ": " y "\n", z); break;
 #define tcl(x) case x: dbg_printf(#x "\n"); break;
