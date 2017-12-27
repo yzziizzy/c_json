@@ -327,6 +327,15 @@ int json_obj_set_key(struct json_value* obj, char* key, struct json_value* val) 
 }
 
 
+// number of keys in an object
+// -1 on error
+int json_obj_length(struct json_value* val) {
+	if(val->type != JSON_TYPE_OBJ) return -1;
+	
+	return val->v.obj->fill;
+}
+
+
 // iteration. no order. results undefined if modified while iterating
 // returns 0 when there is none left
 // set iter to NULL to start

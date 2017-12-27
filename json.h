@@ -147,6 +147,7 @@ size_t json_array_length(struct json_value* arr);
 struct json_obj* json_obj_create(size_t initial_alloc_size);
 int json_obj_get_key(struct json_value* obj, char* key, struct json_value** val);
 int json_obj_set_key(struct json_value* obj, char* key, struct json_value* val);
+int json_obj_length(struct json_value* obj);
 
 // iteration. no order. results undefined if modified while iterating
 // returns 0 when there is none left
@@ -159,6 +160,7 @@ struct json_file* json_parse_string(char* source, size_t len);
 
 // recursive.
 void json_free(struct json_value* v);
+// TODO: json_file_free(struct json_file* jsf);
 
 char* json_get_type_str(enum json_type t); 
 char* json_get_err_str(enum json_error e);
