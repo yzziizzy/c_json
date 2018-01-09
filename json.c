@@ -1510,7 +1510,7 @@ static struct json_parser* parse_token_stream(struct json_lexer* jl) {
 			dbg_printf("ending obj in begining of obj\n");
 			goto UNEXPECTED_TOKEN;
 		}
-		else if(tok->tokenType != TOKEN_LABEL) {
+		else if(tok->tokenType != TOKEN_LABEL && tok->tokenType != TOKEN_STRING) {
 			// error
 			dbg_printf("!!!missing label\n");
 			goto UNEXPECTED_TOKEN;

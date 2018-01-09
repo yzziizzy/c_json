@@ -55,5 +55,6 @@ int main(int argc, char* argv[]) {
 // 	free(contents);
 // 	
 // 	
+//	getchar();
 	return 0;
 }
