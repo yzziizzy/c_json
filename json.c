@@ -4,8 +4,10 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdarg.h>
+#include <ctype.h>
 
 #include "json.h"
+#include "MurmurHash3.h"
 
 #define MURMUR_SEED 718281828
 
