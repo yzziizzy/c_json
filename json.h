@@ -125,6 +125,12 @@ JSON_TYPEDEF struct json_file {
 	
 } JSON_TD(json_file_t);
 
+JSON_TYPEDEF struct json_string_buffer {
+	char* buf;
+	size_t length;
+	size_t alloc;
+} JSON_TD(json_string_buffer_t);
+
 
 int json_as_type(struct json_value* v, enum json_type t, void* out); 
 int json_as_int(struct json_value* v, int64_t* out); 
