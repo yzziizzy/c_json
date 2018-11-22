@@ -1949,7 +1949,7 @@ static void json_obj_to_string(struct json_string_buffer* sb, struct json_obj* o
 static void json_arr_to_string(struct json_string_buffer* sb, struct json_array* arr);
 
 struct json_string_buffer* json_string_buffer_create(int initSize) {
-	struct json_String_buffer* b;
+	struct json_string_buffer* b;
 	b = malloc(sizeof(*b));
 	
 	b->length = 0;
@@ -1989,7 +1989,7 @@ static char* sb_tail_check(struct json_string_buffer* sb, int more) {
 }
 
 #define sb_tail_catf(sb, fmt, arg) \
-	snprintf(sb_tail_check(snprintf(NULL, fmt, arg)), fmt, arg);
+	sprintf(sb_tail_check(sb, snprintf(NULL, 0, fmt, arg)), fmt, arg);
 
 void json_value_to_string(struct json_string_buffer* sb, struct json_value* v) {
 	
@@ -1999,11 +1999,11 @@ void json_value_to_string(struct json_string_buffer* sb, struct json_value* v) {
 			break;
 			
 		case JSON_TYPE_NULL: 
-			sb_cat("null"); 
+			sb_cat(sb, "null"); 
 			break;
 			
 		case JSON_TYPE_INT: 
-			sb_tail_catf(sb, "%ld", (int)v->v.integer);
+			sb_tail_catf(sb, "%ld", v->v.integer);
 			break;
 			
 		case JSON_TYPE_DOUBLE: 
@@ -2056,20 +2056,20 @@ static void json_arr_to_string(struct json_string_buffer* sb, struct json_array*
 static void json_obj_to_string(struct json_string_buffer* sb, struct json_obj* obj) {
 	int i;
 	struct json_obj_field* f;
-	
+	/*
 	
 	sb_cat(sb, "{");
 	
 	n = arr->head;
 	for(i = 0; i < obj->alloc_size; i++) {
-		f = obj->buckets[i];
+		f = &obj->buckets[i];
 		if(f->key == NULL) continue;
 		
-		sb_catf(sb, "\"%s\":", f->key);
+		sb_tail_catf(sb, "\"%s\":", f->key);
 		json_value_to_string(sb, f->value);
 		sb_cat(sb, ",");
 	}
 	
-	sb_cat(sb, "}");
+	sb_cat(sb, "}");*/
 }
 
