@@ -1941,3 +1941,135 @@ void json_dump_value(struct json_value* root, int cur_depth, int max_depth) {
 }
 
 
+
+
+// JSON output
+
+static void json_obj_to_string(struct json_string_buffer* sb, struct json_obj* obj);
+static void json_arr_to_string(struct json_string_buffer* sb, struct json_array* arr);
+
+struct json_string_buffer* json_string_buffer_create(int initSize) {
+	struct json_String_buffer* b;
+	b = malloc(sizeof(*b));
+	
+	b->length = 0;
+	b->alloc = initSize;
+	b->buf = malloc(initSize * sizeof(*b->buf));
+	b->buf[0] = 0;
+	
+	return b;
+}
+
+static void sb_check(struct json_string_buffer* sb, int more) {
+	char* tmp;
+	
+	if(sb->length + 1 + more < sb->alloc) {
+		tmp = realloc(sb->buf, sb->alloc * 2);
+		if(tmp) {
+			sb->buf = tmp;
+			sb->alloc *= 2;
+		}
+		else {
+			fprintf(stderr, "c_json: Memory allocation failed.\n");
+		}
+	} 
+}
+
+// checks size and concatenates string
+static void sb_cat(struct json_string_buffer* sb, char* str) {
+	// TODO: optimize
+	size_t len = strlen(str);
+	sb_check(sb, len);
+	strcat(sb->buf, str);
+}
+
+static char* sb_tail_check(struct json_string_buffer* sb, int more) {
+	sb_check(sb, more);
+	return sb->buf + sb->length;
+}
+
+#define sb_tail_catf(sb, fmt, arg) \
+	snprintf(sb_tail_check(snprintf(NULL, fmt, arg)), fmt, arg);
+
+void json_value_to_string(struct json_string_buffer* sb, struct json_value* v) {
+	
+	switch(v->type) {
+		case JSON_TYPE_UNDEFINED:
+			sb_cat(sb, "undefined");
+			break;
+			
+		case JSON_TYPE_NULL: 
+			sb_cat("null"); 
+			break;
+			
+		case JSON_TYPE_INT: 
+			sb_tail_catf(sb, "%ld", (int)v->v.integer);
+			break;
+			
+		case JSON_TYPE_DOUBLE: 
+			sb_tail_catf(sb, "%f", v->v.dbl); // TODO: handle infinity, nan, etc
+			break;
+			
+		case JSON_TYPE_STRING:
+			sb_tail_catf(sb, "\"%s\"", v->v.str); // TODO: escape
+			break;
+			
+		case JSON_TYPE_OBJ: break;
+			json_obj_to_string(sb, v->v.obj);
+		
+		case JSON_TYPE_ARRAY: break;
+			json_arr_to_string(sb, v->v.arr);
+		
+		case JSON_TYPE_COMMENT_SINGLE:
+			sb_tail_catf(sb, "//%s\n", v->v.str);
+			break;
+			
+		case JSON_TYPE_COMMENT_MULTI: 
+			sb_tail_catf(sb, "/* %s */\n", v->v.str);
+			break;
+			
+		default: 
+			fprintf(stderr, "c_json: unknown type in json_value_to_string\n");
+	}
+}
+
+
+
+static void json_arr_to_string(struct json_string_buffer* sb, struct json_array* arr) {
+	struct json_array_node* n;
+	
+	
+	sb_cat(sb, "[");
+	
+	n = arr->head;
+	while(n) {
+		
+		json_value_to_string(sb, n->value);
+		sb_cat(sb, ",");
+		
+		n = n->next;
+	}
+	
+	sb_cat(sb, "]");
+}
+
+static void json_obj_to_string(struct json_string_buffer* sb, struct json_obj* obj) {
+	int i;
+	struct json_obj_field* f;
+	
+	
+	sb_cat(sb, "{");
+	
+	n = arr->head;
+	for(i = 0; i < obj->alloc_size; i++) {
+		f = obj->buckets[i];
+		if(f->key == NULL) continue;
+		
+		sb_catf(sb, "\"%s\":", f->key);
+		json_value_to_string(sb, f->value);
+		sb_cat(sb, ",");
+	}
+	
+	sb_cat(sb, "}");
+}
+
