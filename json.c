@@ -329,6 +329,69 @@ int json_obj_set_key(struct json_value* obj, char* key, struct json_value* val) 
 }
 
 
+// will probably be changed or removed later
+// coerces and strdup's the result
+// returns null if the key does not exist
+char* json_obj_key_as_string(struct json_value* obj, char* key) {
+	json_value_t* val;
+	char* str;
+	
+	if(json_obj_get_key(obj, key, &val)) {
+		return NULL;
+	}
+	
+	json_as_string(val, &str);
+	return strdup(str);
+}
+
+
+// returns pointer to the internal string, or null if it's not a a string
+char* json_obj_get_string(struct json_value* obj, char* key) {
+	json_value_t* val;
+	
+	if(json_obj_get_key(obj, key, &val)) {
+		return NULL;
+	}
+	
+	if(val->type != JSON_TYPE_STRING) {
+		return NULL;
+	}
+	
+	return val->v.str;
+}
+
+// returns an integer or the default value if it's not an integer
+int64_t json_obj_get_int(struct json_value* obj, char* key, int64_t def) {
+	json_value_t* val;
+	
+	if(json_obj_get_key(obj, key, &val)) {
+		return def;
+	}
+	
+	if(val->type != JSON_TYPE_INT) {
+		return def;
+	}
+	
+	return val->v.integer;
+}
+
+// returns a double or the default value if it's not an integer
+double json_obj_get_double(struct json_value* obj, char* key, double def) {
+	json_value_t* val;
+	
+	if(json_obj_get_key(obj, key, &val)) {
+		return def;
+	}
+	
+	if(val->type != JSON_TYPE_DOUBLE) {
+		return def;
+	}
+	
+	return val->v.dbl;
+}
+
+
+
 // number of keys in an object
 // -1 on error
 int json_obj_length(struct json_value* val) {
@@ -642,7 +705,7 @@ int json_as_string(struct json_value* v, char** out) {
 			return 0;
 			
 		case JSON_TYPE_INT:
-			*out = asprintf("%d", v->v.integer);
+			*out = asprintf("%d", v->v.integer); // might leak memory
 			return 0;
 			
 		case JSON_TYPE_DOUBLE:

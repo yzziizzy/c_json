@@ -147,6 +147,16 @@ size_t json_array_length(struct json_value* arr);
 struct json_obj* json_obj_create(size_t initial_alloc_size);
 int json_obj_get_key(struct json_value* obj, char* key, struct json_value** val);
 int json_obj_set_key(struct json_value* obj, char* key, struct json_value* val);
+char* json_obj_key_as_string(struct json_value* obj, char* key);
+
+// returns pointer to the internal string, or null if it's not a a string
+char* json_obj_get_string(struct json_value* obj, char* key);
+// returns a double or the default value if it's not an integer
+double json_obj_get_double(struct json_value* obj, char* key, double def);
+// returns an integer or the default value if it's not an integer
+int64_t json_obj_get_int(struct json_value* obj, char* key, int64_t def);
+
+
 int json_obj_length(struct json_value* obj);
 
 // iteration. no order. results undefined if modified while iterating
