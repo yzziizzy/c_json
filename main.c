@@ -19,8 +19,8 @@ int main(int argc, char* argv[]) {
 	struct json_output_format fmt = {
 		.indentChar = ' ',
 		.indentAmt = 4,
-		.minArraySzExpand = 400,
-		.minObjSzExpand = 300,
+		.minArraySzExpand = 4,
+		.minObjSzExpand = 3,
 		.trailingComma = 1,
 		.objColonSpace = 1,
 		.useSingleQuotes = 1,
@@ -35,6 +35,7 @@ int main(int argc, char* argv[]) {
 	ctx.depth = 0;
 	
 	json_value_to_string(&ctx, jf->root);
+// 	json_value_to_string(&ctx, NULL);
 	
 	
 	printf(">%s<\n", ctx.sb->buf);

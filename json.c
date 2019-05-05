@@ -737,6 +737,7 @@ static int decode_c_escape_str(char* in, char* out, size_t len) {
 	for(i = 0; i < len; i++) {
 		if(*in == '\\') {
 			in++;
+			i++;
 			switch(*in) {
 				case '\'': *out = '\''; break; 
 				case '"': *out = '"'; break; 
@@ -847,7 +848,8 @@ static int lex_string_token(struct json_lexer* jl) {
 
 	// find len, count lines
 	while(1) {
-		if(*se == delim) break;
+		
+		if(*se == delim && *(se-1) != '\\') break;
 		if(*se == '\0') {
 			jl->error = JSON_LEX_ERROR_NULL_IN_STRING;
 			return 1;
@@ -2006,6 +2008,11 @@ void json_value_to_string(struct json_write_context* ctx, struct json_value* v) 
 	char* float_format = ctx->fmt.floatFormat ? ctx->fmt.floatFormat : "%f"; 
 	char qc;
 	
+	if(!v) {
+		fprintf(stderr, "NULL value passed to %s()\n", __func__);
+		return;
+	}
+	
 	switch(v->type) {
 		case JSON_TYPE_UNDEFINED:
 			sb_cat(sb, "undefined");
@@ -2166,9 +2173,12 @@ static void json_obj_to_string(struct json_write_context* ctx, struct json_obj* 
 		
 		int needquotes = key_must_have_quotes(f->key); 
 		
-		if(!noquotes || needquotes) sb_putc(sb, quoteChar);
-		sb_cat(sb, f->key);
-		if(!noquotes || needquotes) sb_putc(sb, quoteChar);
+		if(!noquotes || needquotes) {
+			sb_putc(sb, quoteChar);
+			sb_cat_escaped(ctx, f->key);
+			sb_putc(sb, quoteChar);
+		}
+		else sb_cat(sb, f->key);
 		
 		sb_putc(sb, ':');
 		if(ctx->fmt.objColonSpace) sb_putc(sb, ' ');
