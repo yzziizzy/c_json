@@ -132,6 +132,7 @@ JSON_TYPEDEF struct json_string_buffer {
 	char* buf;
 	size_t length;
 	size_t alloc;
+	int line_len;
 } JSON_TD(json_string_buffer_t);
 
 
@@ -139,18 +140,23 @@ JSON_TYPEDEF struct json_output_format {
 	char indentChar;
 	char indentAmt;
 	char trailingComma;
+// 	char commaBeforeElem;
 	char objColonSpace;
 	char noQuoteKeys;
+	char useSingleQuotes;
+// 	char escapeNonLatin;
+// 	char breakLongStrings;
 	int minArraySzExpand;
 	int minObjSzExpand;
+	int maxLineLength; // only wraps after the comma on array/obj elements
 	char* floatFormat;
 } JSON_TD(json_output_format_t);
 
 
 JSON_TYPEDEF struct json_write_context {
-	struct json_output_format* fmt;
-	struct json_string_buffer* sb;
 	int depth;
+	struct json_string_buffer* sb;
+	struct json_output_format fmt;
 } JSON_TD(json_write_context_t);
 
 
@@ -212,6 +218,8 @@ void json_dump_value(struct json_value* root, int cur_depth, int max_depth);
 
 
 struct json_string_buffer* json_string_buffer_create(size_t initSize);
+void json_string_buffer_free(struct json_string_buffer* sb);
+
 void json_value_to_string(struct json_write_context* ctx, struct json_value* v);
 
 #endif // JSON__JSON_H__INCLUDED

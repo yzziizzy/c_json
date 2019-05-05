@@ -1928,6 +1928,7 @@ void json_dump_value(struct json_value* root, int cur_depth, int max_depth) {
 
 // JSON output
 
+static void sb_cat_escaped(struct json_write_context* ctx, char* str);
 static void json_obj_to_string(struct json_write_context* sb, struct json_obj* obj);
 static void json_arr_to_string(struct json_write_context* sb, struct json_array* arr);
 
@@ -1941,6 +1942,13 @@ struct json_string_buffer* json_string_buffer_create(size_t initSize) {
 	b->buf[0] = 0;
 	
 	return b;
+}
+
+void json_string_buffer_free(struct json_string_buffer* sb) {
+	free(sb->buf);
+	sb->buf = NULL;
+	sb->length = 0;
+	sb->alloc = 0;
 }
 
 static void sb_check(struct json_string_buffer* sb, size_t more) {
@@ -1959,12 +1967,14 @@ static void sb_check(struct json_string_buffer* sb, size_t more) {
 }
 
 // checks size and concatenates string
+// does not check for newlines re: line_len
 static void sb_cat(struct json_string_buffer* sb, char* str) {
 	// TODO: optimize
 	size_t len = strlen(str);
 	sb_check(sb, len);
 	strcat(sb->buf, str);
 	sb->length += len;
+	sb->line_len += len; 
 }
 
 // checks size and concatenates a single char
@@ -1975,6 +1985,7 @@ static void sb_putc(struct json_string_buffer* sb, int c) {
 	sb->buf[sb->length] = c;
 	sb->buf[sb->length + 1] = 0;
 	sb->length++;
+	sb->line_len = c == '\n' ? 0 : sb->line_len + 1; 
 }
 
 static char* sb_tail_check(struct json_string_buffer* sb, int more) {
@@ -1987,10 +1998,13 @@ do { \
 	size_t _len = snprintf(NULL, 0, fmt, ##__VA_ARGS__); \
 	sprintf(sb_tail_check(sb, _len), fmt, ##__VA_ARGS__); \
 	sb->length += _len; \
+	sb->line_len += _len; \
 } while(0);
 
 void json_value_to_string(struct json_write_context* ctx, struct json_value* v) {
 	struct json_string_buffer* sb = ctx->sb;
+	char* float_format = ctx->fmt.floatFormat ? ctx->fmt.floatFormat : "%f"; 
+	char qc;
 	
 	switch(v->type) {
 		case JSON_TYPE_UNDEFINED:
@@ -2006,11 +2020,14 @@ void json_value_to_string(struct json_write_context* ctx, struct json_value* v) 
 			break;
 			
 		case JSON_TYPE_DOUBLE: 
-			sb_tail_catf(sb, "%f", v->v.dbl); // TODO: handle infinity, nan, etc
+			sb_tail_catf(sb, float_format, v->v.dbl); // TODO: handle infinity, nan, etc
 			break;
 			
 		case JSON_TYPE_STRING:
-			sb_tail_catf(sb, "\"%s\"", v->v.str); // TODO: escape
+			qc = ctx->fmt.useSingleQuotes ? '\'' : '"';
+			sb_putc(sb, qc);
+			sb_cat_escaped(ctx, v->v.str); 
+			sb_putc(sb, qc);
 			break;
 			
 		case JSON_TYPE_OBJ: 
@@ -2021,11 +2038,11 @@ void json_value_to_string(struct json_write_context* ctx, struct json_value* v) 
 			json_arr_to_string(ctx, v->v.arr);
 			break;
 			
-		case JSON_TYPE_COMMENT_SINGLE:
+		case JSON_TYPE_COMMENT_SINGLE: // TODO: handle linebreaks in the comment string
 			sb_tail_catf(sb, "//%s\n", v->v.str);
 			break;
 			
-		case JSON_TYPE_COMMENT_MULTI: 
+		case JSON_TYPE_COMMENT_MULTI: // TODO: clean "*/" out of the comment string
 			sb_tail_catf(sb, "/* %s */\n", v->v.str);
 			break;
 			
@@ -2035,29 +2052,57 @@ void json_value_to_string(struct json_write_context* ctx, struct json_value* v) 
 }
 
 
+
+
 static void ctx_indent(struct json_write_context* ctx) {
 	int i = 0; 
-	int len = ctx->fmt->indentAmt * ctx->depth;
+	int len = ctx->fmt.indentAmt * ctx->depth;
 	
 	char* c = sb_tail_check(ctx->sb, len);
 	
 	for(i = 0; i < len; i++) {
-		c[i] = ctx->fmt->indentChar;
+		c[i] = ctx->fmt.indentChar;
 	}
 	
 	c[len] = 0;
 	ctx->sb->length += len;
+	
+	ctx->sb->line_len += len;
 }
+
+static int line_too_long(struct json_write_context* ctx) {
+	if(ctx->fmt.maxLineLength < 0) return 0;
+	if(ctx->sb->line_len <= ctx->fmt.maxLineLength) return 0;
+	return 1;
+}
+
+
+
+static void sb_cat_escaped(struct json_write_context* ctx, char* str) {
+	struct json_string_buffer* sb = ctx->sb;
+	char qc = ctx->fmt.useSingleQuotes ? '\'' : '"';
+	
+	while(*str) {
+		char c = *str;
+		
+		if(c == qc) sb_putc(sb, '\\');
+		sb_putc(sb, c);
+		
+		str++;
+	}
+	
+}
+
 
 static void json_arr_to_string(struct json_write_context* ctx, struct json_array* arr) {
 	struct json_array_node* n;
 	struct json_string_buffer* sb = ctx->sb;
 	
-	int multiline = arr->length >= ctx->fmt->minArraySzExpand;
+	int multiline = arr->length >= ctx->fmt.minArraySzExpand;
 	
-	sb_cat(sb, "[");
+	sb_putc(sb, '[');
 	
-	if(multiline) sb_cat(sb, "\n");
+	if(multiline) sb_putc(sb, '\n');
 	
 	ctx->depth++;
 	
@@ -2071,31 +2116,44 @@ static void json_arr_to_string(struct json_write_context* ctx, struct json_array
 		n = n->next;
 		
 		if(n) {
-			sb_cat(sb, ",");
-			if(!multiline) sb_cat(sb, " ");
+			sb_putc(sb, ',');
+			if(!multiline) sb_putc(sb, ' ');
 		}
-		else if(ctx->fmt->trailingComma && multiline) sb_cat(sb, ",");
+		else if(ctx->fmt.trailingComma && multiline) sb_putc(sb, ',');
 		
-		if(multiline) sb_cat(sb, "\n");
+		if(multiline) sb_putc(sb, '\n');
+		if(line_too_long(ctx)) {
+			sb_putc(sb, '\n');
+			ctx_indent(ctx);
+		}
 	}
 	
 	ctx->depth--;
 	
 	if(multiline) ctx_indent(ctx);
 	
-	sb_cat(sb, "]");
+	sb_putc(sb, ']');
 }
+
+
+static int key_must_have_quotes(char* key) {
+	if(isdigit(key[0])) return 1;
+	return  strlen(key) != strspn(key, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_$");
+}
+
 
 static void json_obj_to_string(struct json_write_context* ctx, struct json_obj* obj) {
 	int i;
 	struct json_obj_field* f;
 	struct json_string_buffer* sb = ctx->sb;
 	
-	int multiline = obj->fill >= ctx->fmt->minObjSzExpand;
+	int multiline = obj->fill >= ctx->fmt.minObjSzExpand;
+	int noquotes = ctx->fmt.noQuoteKeys;
+	char quoteChar = ctx->fmt.useSingleQuotes ? '\'' : '"';
 	
-	sb_cat(sb, "{");
+	sb_putc(sb, '{');
 	
-	if(multiline) sb_cat(sb, "\n");
+	if(multiline) sb_putc(sb, '\n');
 	
 	ctx->depth++;
 	
@@ -2106,22 +2164,33 @@ static void json_obj_to_string(struct json_write_context* ctx, struct json_obj* 
 		
 		if(multiline) ctx_indent(ctx);
 		
-		sb_tail_catf(sb, "\"%s\":", f->key);
-		if(ctx->fmt->objColonSpace) sb_cat(sb, " ");
+		int needquotes = key_must_have_quotes(f->key); 
+		
+		if(!noquotes || needquotes) sb_putc(sb, quoteChar);
+		sb_cat(sb, f->key);
+		if(!noquotes || needquotes) sb_putc(sb, quoteChar);
+		
+		sb_putc(sb, ':');
+		if(ctx->fmt.objColonSpace) sb_putc(sb, ' ');
+		
 		json_value_to_string(ctx, f->value);
 		
 		if(n-- > 1) {
-			sb_cat(sb, ",");
-			if(!multiline) sb_cat(sb, " ");
+			sb_putc(sb, ',');
+			if(!multiline) sb_putc(sb, ' ');
 		}
-		else if(ctx->fmt->trailingComma && multiline) sb_cat(sb, ",");
+		else if(ctx->fmt.trailingComma && multiline) sb_putc(sb, ',');
 		
-		if(multiline) sb_cat(sb, "\n");
+		if(multiline) sb_putc(sb, '\n');
+		if(line_too_long(ctx)) {
+			sb_putc(sb, '\n');
+			ctx_indent(ctx);
+		}
 	}
 	
 	ctx->depth--;
 	
 	if(multiline) ctx_indent(ctx);
-	sb_cat(sb, "}");
+	sb_putc(sb, '}');
 }
 

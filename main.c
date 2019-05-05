@@ -19,16 +19,19 @@ int main(int argc, char* argv[]) {
 	struct json_output_format fmt = {
 		.indentChar = ' ',
 		.indentAmt = 4,
-		.minArraySzExpand = 4,
-		.minObjSzExpand = 3,
+		.minArraySzExpand = 400,
+		.minObjSzExpand = 300,
 		.trailingComma = 1,
 		.objColonSpace = 1,
+		.useSingleQuotes = 1,
+		.noQuoteKeys = 1,
+		.maxLineLength = 20,
 	};
 	
 	
 	struct json_write_context ctx;
 	ctx.sb = json_string_buffer_create(4000);
-	ctx.fmt = &fmt;
+	ctx.fmt = fmt;
 	ctx.depth = 0;
 	
 	json_value_to_string(&ctx, jf->root);
