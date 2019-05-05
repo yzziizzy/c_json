@@ -2,6 +2,8 @@
 #define JSON__JSON_H__INCLUDED
 
 
+#include <stddef.h>
+#include <stdio.h>
 #include <stdarg.h>
 #include <stdint.h>
 
@@ -131,6 +133,19 @@ JSON_TYPEDEF struct json_string_buffer {
 	size_t alloc;
 } JSON_TD(json_string_buffer_t);
 
+JSON_TYPEDEF struct json_output_format {
+	char indentChar;
+	char indentAmt;
+	int minArraySzExpand;
+	int minObjSzExpand;
+} JSON_TD(json_output_format_t);
+
+JSON_TYPEDEF struct json_write_context {
+	struct json_output_format* fmt;
+	struct json_string_buffer* sb;
+	int depth;
+} JSON_TD(json_write_context_t);
+
 
 int json_as_type(struct json_value* v, enum json_type t, void* out); 
 int json_as_int(struct json_value* v, int64_t* out); 
@@ -153,6 +168,10 @@ size_t json_array_length(struct json_value* arr);
 struct json_obj* json_obj_create(size_t initial_alloc_size);
 int json_obj_get_key(struct json_value* obj, char* key, struct json_value** val);
 int json_obj_set_key(struct json_value* obj, char* key, struct json_value* val);
+
+// will probably be changed or removed later
+// coerces and strdup's the result
+// returns null if the key does not exist
 char* json_obj_key_as_string(struct json_value* obj, char* key);
 
 // returns pointer to the internal string, or null if it's not a a string
@@ -182,5 +201,10 @@ char* json_get_type_str(enum json_type t);
 char* json_get_err_str(enum json_error e);
 
 void json_dump_value(struct json_value* root, int cur_depth, int max_depth);
+
+
+
+struct json_string_buffer* json_string_buffer_create(size_t initSize);
+void json_value_to_string(struct json_write_context* ctx, struct json_value* v);
 
 #endif // JSON__JSON_H__INCLUDED

@@ -14,7 +14,26 @@ int main(int argc, char* argv[]) {
 	int nr;
 	struct json_file* jf;
 	
-	jf = json_load_path(argv[1]);
+	jf = json_load_path("./test.json");//argv[1]);
+	
+	struct json_output_format fmt = {
+		.indentChar = ' ',
+		.indentAmt = 4,
+		.minArraySzExpand = 4,
+		.minObjSzExpand = 3,
+	};
+	
+	
+	struct json_write_context ctx;
+	ctx.sb = json_string_buffer_create(4000);
+	ctx.fmt = &fmt;
+	ctx.depth = 0;
+	
+	json_value_to_string(&ctx, jf->root);
+	
+	
+	printf(">%s<\n", ctx.sb->buf);
+	
 // 	f = fopen(argv[1], "rb");
 // 	if(!f) {
 // 		printf("no such file\n");

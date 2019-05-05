@@ -345,7 +345,7 @@ char* json_obj_key_as_string(struct json_value* obj, char* key) {
 }
 
 
-// returns pointer to the internal string, or null if it's not a a string
+// returns pointer to the internal string, or null if it's not a string
 char* json_obj_get_string(struct json_value* obj, char* key) {
 	json_value_t* val;
 	
@@ -1945,10 +1945,10 @@ void json_dump_value(struct json_value* root, int cur_depth, int max_depth) {
 
 // JSON output
 
-static void json_obj_to_string(struct json_string_buffer* sb, struct json_obj* obj);
-static void json_arr_to_string(struct json_string_buffer* sb, struct json_array* arr);
+static void json_obj_to_string(struct json_write_context* sb, struct json_obj* obj);
+static void json_arr_to_string(struct json_write_context* sb, struct json_array* arr);
 
-struct json_string_buffer* json_string_buffer_create(int initSize) {
+struct json_string_buffer* json_string_buffer_create(size_t initSize) {
 	struct json_string_buffer* b;
 	b = malloc(sizeof(*b));
 	
@@ -1960,17 +1960,17 @@ struct json_string_buffer* json_string_buffer_create(int initSize) {
 	return b;
 }
 
-static void sb_check(struct json_string_buffer* sb, int more) {
+static void sb_check(struct json_string_buffer* sb, size_t more) {
 	char* tmp;
-	
-	if(sb->length + 1 + more < sb->alloc) {
+
+	if(sb->length + 1 + more > sb->alloc) {
 		tmp = realloc(sb->buf, sb->alloc * 2);
 		if(tmp) {
 			sb->buf = tmp;
 			sb->alloc *= 2;
 		}
 		else {
-			fprintf(stderr, "c_json: Memory allocation failed.\n");
+			fprintf(stderr, "c_json: Memory allocation failed\n");
 		}
 	} 
 }
@@ -1981,6 +1981,7 @@ static void sb_cat(struct json_string_buffer* sb, char* str) {
 	size_t len = strlen(str);
 	sb_check(sb, len);
 	strcat(sb->buf, str);
+	sb->length += len;
 }
 
 static char* sb_tail_check(struct json_string_buffer* sb, int more) {
@@ -1988,10 +1989,15 @@ static char* sb_tail_check(struct json_string_buffer* sb, int more) {
 	return sb->buf + sb->length;
 }
 
-#define sb_tail_catf(sb, fmt, arg) \
-	sprintf(sb_tail_check(sb, snprintf(NULL, 0, fmt, arg)), fmt, arg);
+#define sb_tail_catf(sb, fmt, ...) \
+do { \
+	size_t _len = snprintf(NULL, 0, fmt, ##__VA_ARGS__); \
+	sprintf(sb_tail_check(sb, _len), fmt, ##__VA_ARGS__); \
+	sb->length += _len; \
+} while(0);
 
-void json_value_to_string(struct json_string_buffer* sb, struct json_value* v) {
+void json_value_to_string(struct json_write_context* ctx, struct json_value* v) {
+	struct json_string_buffer* sb = ctx->sb;
 	
 	switch(v->type) {
 		case JSON_TYPE_UNDEFINED:
@@ -2002,7 +2008,7 @@ void json_value_to_string(struct json_string_buffer* sb, struct json_value* v) {
 			sb_cat(sb, "null"); 
 			break;
 			
-		case JSON_TYPE_INT: 
+		case JSON_TYPE_INT: // 2
 			sb_tail_catf(sb, "%ld", v->v.integer);
 			break;
 			
@@ -2014,12 +2020,14 @@ void json_value_to_string(struct json_string_buffer* sb, struct json_value* v) {
 			sb_tail_catf(sb, "\"%s\"", v->v.str); // TODO: escape
 			break;
 			
-		case JSON_TYPE_OBJ: break;
-			json_obj_to_string(sb, v->v.obj);
-		
-		case JSON_TYPE_ARRAY: break;
-			json_arr_to_string(sb, v->v.arr);
-		
+		case JSON_TYPE_OBJ: 
+			json_obj_to_string(ctx, v->v.obj);
+			break;
+			
+		case JSON_TYPE_ARRAY: // 6
+			json_arr_to_string(ctx, v->v.arr);
+			break;
+			
 		case JSON_TYPE_COMMENT_SINGLE:
 			sb_tail_catf(sb, "//%s\n", v->v.str);
 			break;
@@ -2034,42 +2042,84 @@ void json_value_to_string(struct json_string_buffer* sb, struct json_value* v) {
 }
 
 
+static void ctx_indent(struct json_write_context* ctx) {
+	int i = 0; 
+	int len = ctx->fmt->indentAmt * ctx->depth;
+	
+	char* c = sb_tail_check(ctx->sb, len);
+	
+	for(i = 0; i < len; i++) {
+		c[i] = ctx->fmt->indentChar;
+	}
+	
+	c[len] = 0;
+	ctx->sb->length += len;
+}
 
-static void json_arr_to_string(struct json_string_buffer* sb, struct json_array* arr) {
+static void json_arr_to_string(struct json_write_context* ctx, struct json_array* arr) {
 	struct json_array_node* n;
+	struct json_string_buffer* sb = ctx->sb;
 	
+	int multiline = arr->length >= ctx->fmt->minArraySzExpand;
 	
+// 	ctx_indent(ctx);
 	sb_cat(sb, "[");
+	
+	if(multiline) sb_cat(sb, "\n");
+	
+	ctx->depth++;
 	
 	n = arr->head;
 	while(n) {
 		
-		json_value_to_string(sb, n->value);
-		sb_cat(sb, ",");
+		if(multiline) ctx_indent(ctx);
+		
+		json_value_to_string(ctx, n->value);
 		
 		n = n->next;
+		if(n) sb_cat(sb, ",");
+		if(multiline) sb_cat(sb, "\n");
 	}
+	
+	ctx->depth--;
+	
+	if(multiline) ctx_indent(ctx);
 	
 	sb_cat(sb, "]");
 }
 
-static void json_obj_to_string(struct json_string_buffer* sb, struct json_obj* obj) {
+static void json_obj_to_string(struct json_write_context* ctx, struct json_obj* obj) {
 	int i;
 	struct json_obj_field* f;
-	/*
+	struct json_string_buffer* sb = ctx->sb;
 	
+	int multiline = obj->fill >= ctx->fmt->minObjSzExpand;
+	
+// 	ctx_indent(ctx);
 	sb_cat(sb, "{");
 	
-	n = arr->head;
+	if(multiline) sb_cat(sb, "\n");
+	
+	ctx->depth++;
+	
+	int n = obj->fill;
 	for(i = 0; i < obj->alloc_size; i++) {
 		f = &obj->buckets[i];
 		if(f->key == NULL) continue;
 		
+		if(multiline) ctx_indent(ctx);
+		else sb_cat(sb, " ");
+		
 		sb_tail_catf(sb, "\"%s\":", f->key);
-		json_value_to_string(sb, f->value);
-		sb_cat(sb, ",");
+		json_value_to_string(ctx, f->value);
+		if(n-- > 1) sb_cat(sb, ",");
+		
+		if(multiline) sb_cat(sb, "\n");
 	}
 	
-	sb_cat(sb, "}");*/
+	ctx->depth--;
+	
+	if(multiline) ctx_indent(ctx);
+	sb_cat(sb, "}");
 }
 
