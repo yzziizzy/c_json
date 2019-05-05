@@ -1,4 +1,6 @@
- 
+
+#define __STDC_WANT_LIB_EXT2__ 1
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -669,25 +671,6 @@ int json_as_double(struct json_value* v, double* out) {
 	}
 }
 
-// alloc some space first
-static char* asprintf(char* fmt, ...) {
-	va_list args;
-	char* buf;
-	size_t len;
-	int n;
-	
-	va_start(args, fmt);
-	
-	len = vsnprintf(NULL, 0, fmt, args);
-	buf = malloc(len + 1);
-	if(!buf) return NULL;
-	
-	vsnprintf(buf, len, fmt, args);
-	
-	va_end (args);
-	
-	return buf;
-}
 
 
 // returns 0 for success
@@ -705,11 +688,11 @@ int json_as_string(struct json_value* v, char** out) {
 			return 0;
 			
 		case JSON_TYPE_INT:
-			*out = asprintf("%d", v->v.integer); // might leak memory
+			asprintf(out, "%ld", v->v.integer); // BUG might leak memory
 			return 0;
 			
 		case JSON_TYPE_DOUBLE:
-			*out = asprintf("%f", v->v.dbl);
+			asprintf(out, "%f", v->v.dbl);
 			return 0;
 			
 		case JSON_TYPE_COMMENT_SINGLE:
@@ -1984,6 +1967,16 @@ static void sb_cat(struct json_string_buffer* sb, char* str) {
 	sb->length += len;
 }
 
+// checks size and concatenates a single char
+static void sb_putc(struct json_string_buffer* sb, int c) {
+	// TODO: optimize
+	
+	sb_check(sb, 1);
+	sb->buf[sb->length] = c;
+	sb->buf[sb->length + 1] = 0;
+	sb->length++;
+}
+
 static char* sb_tail_check(struct json_string_buffer* sb, int more) {
 	sb_check(sb, more);
 	return sb->buf + sb->length;
@@ -2062,7 +2055,6 @@ static void json_arr_to_string(struct json_write_context* ctx, struct json_array
 	
 	int multiline = arr->length >= ctx->fmt->minArraySzExpand;
 	
-// 	ctx_indent(ctx);
 	sb_cat(sb, "[");
 	
 	if(multiline) sb_cat(sb, "\n");
@@ -2101,7 +2093,6 @@ static void json_obj_to_string(struct json_write_context* ctx, struct json_obj* 
 	
 	int multiline = obj->fill >= ctx->fmt->minObjSzExpand;
 	
-// 	ctx_indent(ctx);
 	sb_cat(sb, "{");
 	
 	if(multiline) sb_cat(sb, "\n");

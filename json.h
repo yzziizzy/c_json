@@ -13,8 +13,8 @@
 	#define dbg_printf(args...) printf(args)
 #else
 	#define dbg_printf(args...) 
-	static void nothin(char* x, ...) {};
-	#define dbg_printf nothin 
+	//static void nothin(char* x, ...) {};
+	//efine dbg_printf nothin 
 #endif
 
 // the parser currently does not handle comments.
@@ -127,11 +127,13 @@ JSON_TYPEDEF struct json_file {
 	
 } JSON_TD(json_file_t);
 
+
 JSON_TYPEDEF struct json_string_buffer {
 	char* buf;
 	size_t length;
 	size_t alloc;
 } JSON_TD(json_string_buffer_t);
+
 
 JSON_TYPEDEF struct json_output_format {
 	char indentChar;
@@ -143,6 +145,7 @@ JSON_TYPEDEF struct json_output_format {
 	int minObjSzExpand;
 	char* floatFormat;
 } JSON_TD(json_output_format_t);
+
 
 JSON_TYPEDEF struct json_write_context {
 	struct json_output_format* fmt;
