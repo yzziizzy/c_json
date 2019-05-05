@@ -2077,7 +2077,13 @@ static void json_arr_to_string(struct json_write_context* ctx, struct json_array
 		json_value_to_string(ctx, n->value);
 		
 		n = n->next;
-		if(n) sb_cat(sb, ",");
+		
+		if(n) {
+			sb_cat(sb, ",");
+			if(!multiline) sb_cat(sb, " ");
+		}
+		else if(ctx->fmt->trailingComma && multiline) sb_cat(sb, ",");
+		
 		if(multiline) sb_cat(sb, "\n");
 	}
 	
@@ -2108,11 +2114,16 @@ static void json_obj_to_string(struct json_write_context* ctx, struct json_obj* 
 		if(f->key == NULL) continue;
 		
 		if(multiline) ctx_indent(ctx);
-		else sb_cat(sb, " ");
 		
 		sb_tail_catf(sb, "\"%s\":", f->key);
+		if(ctx->fmt->objColonSpace) sb_cat(sb, " ");
 		json_value_to_string(ctx, f->value);
-		if(n-- > 1) sb_cat(sb, ",");
+		
+		if(n-- > 1) {
+			sb_cat(sb, ",");
+			if(!multiline) sb_cat(sb, " ");
+		}
+		else if(ctx->fmt->trailingComma && multiline) sb_cat(sb, ",");
 		
 		if(multiline) sb_cat(sb, "\n");
 	}

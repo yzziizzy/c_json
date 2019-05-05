@@ -21,6 +21,8 @@ int main(int argc, char* argv[]) {
 		.indentAmt = 4,
 		.minArraySzExpand = 4,
 		.minObjSzExpand = 3,
+		.trailingComma = 1,
+		.objColonSpace = 1,
 	};
 	
 	

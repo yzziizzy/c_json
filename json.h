@@ -136,8 +136,12 @@ JSON_TYPEDEF struct json_string_buffer {
 JSON_TYPEDEF struct json_output_format {
 	char indentChar;
 	char indentAmt;
+	char trailingComma;
+	char objColonSpace;
+	char noQuoteKeys;
 	int minArraySzExpand;
 	int minObjSzExpand;
+	char* floatFormat;
 } JSON_TD(json_output_format_t);
 
 JSON_TYPEDEF struct json_write_context {
