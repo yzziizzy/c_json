@@ -672,6 +672,24 @@ int json_as_double(struct json_value* v, double* out) {
 }
 
 
+static char* a_sprintf(char* fmt, ...) {
+	va_list args;
+	char* buf;
+	size_t len;
+	int n;
+
+	va_start(args, fmt);
+
+	len = vsnprintf(NULL, 0, fmt, args);
+	buf = malloc(len + 1);
+	if(!buf) return NULL;
+
+	vsnprintf(buf, len, fmt, args);
+
+	va_end (args);
+
+	return buf;
+}
 
 // returns 0 for success
 int json_as_string(struct json_value* v, char** out) {
@@ -688,11 +706,11 @@ int json_as_string(struct json_value* v, char** out) {
 			return 0;
 			
 		case JSON_TYPE_INT:
-			asprintf(out, "%ld", v->v.integer); // BUG might leak memory
+			a_sprintf(out, "%ld", v->v.integer); // BUG might leak memory
 			return 0;
 			
 		case JSON_TYPE_DOUBLE:
-			asprintf(out, "%f", v->v.dbl);
+			a_sprintf(out, "%f", v->v.dbl);
 			return 0;
 			
 		case JSON_TYPE_COMMENT_SINGLE:
