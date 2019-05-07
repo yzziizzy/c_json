@@ -706,11 +706,11 @@ int json_as_string(struct json_value* v, char** out) {
 			return 0;
 			
 		case JSON_TYPE_INT:
-			a_sprintf(out, "%ld", v->v.integer); // BUG might leak memory
+			*out = a_sprintf("%ld", v->v.integer); // BUG might leak memory
 			return 0;
 			
 		case JSON_TYPE_DOUBLE:
-			a_sprintf(out, "%f", v->v.dbl);
+			*out = a_sprintf("%f", v->v.dbl);
 			return 0;
 			
 		case JSON_TYPE_COMMENT_SINGLE:
