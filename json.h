@@ -167,7 +167,7 @@ int json_as_string(struct json_value* v, char** out);
 int json_as_float(struct json_value* v, float* f);
 
 #define JSON_UNPACK(t, f, type) #f, (t), (void*)(&((t)->f)) - (void*)(t), type
-int json_obj_unpack_struct(struct json_value* obj, ...);
+int json_obj_unpack_struct(int count, struct json_value* obj, ...);
 int json_obj_unpack_string_array(struct json_value* obj, char*** out, size_t* len);
 
 
@@ -208,7 +208,7 @@ struct json_file* json_parse_string(char* source, size_t len);
 
 // recursive.
 void json_free(struct json_value* v);
-// TODO: json_file_free(struct json_file* jsf);
+void json_file_free(struct json_file* jsf);
 
 char* json_get_type_str(enum json_type t); 
 char* json_get_err_str(enum json_error e);

@@ -441,8 +441,8 @@ int json_obj_next(struct json_value* val, void** iter, char** key, struct json_v
 
 /* key, target, offset, type */
 // returns number of values filled
-int json_obj_unpack_struct(struct json_value* obj, ...) {
-	int i, count, ret, filled;
+int json_obj_unpack_struct(int count, struct json_value* obj, ...) {
+	int i, ret, filled;
 	char* key;
 	void* target;
 	size_t offset;
@@ -1798,6 +1798,13 @@ void json_free(struct json_value* v) {
 }
 
 
+void json_file_free(struct json_file* jsf){
+	json_free(jsf->root);
+	if(jsf->lex_info) free(jsf->lex_info);
+	free(jsf);
+}
+
+
 #define tc(x, y, z) case x: dbg_printf(#x ": " y "\n", z); break;
 #define tcl(x) case x: dbg_printf(#x "\n"); break;
 
@@ -1871,7 +1878,7 @@ char* json_get_type_str(enum json_type t) {
 		case JSON_TYPE_OBJ: return "object";
 		case JSON_TYPE_ARRAY: return "array";
 		case JSON_TYPE_COMMENT_SINGLE: return "single-line comment";
-		case JSON_TYPE_COMMENT_MULTI: "multi-line comment";
+		case JSON_TYPE_COMMENT_MULTI: return "multi-line comment";
 		default: return "Invalid JSON type";
 	}
 }
@@ -1890,7 +1897,7 @@ char* json_get_err_str(enum json_error e) {
 		case JSON_PARSER_ERROR_CORRUPT_STACK: return "Parser stack corrupted";
 		case JSON_PARSER_ERROR_STACK_EXHAUSTED: return "Parser stack prematurely exhausted";
 		case JSON_PARSER_ERROR_UNEXPECTED_EOI: return "Unexpected end of input (parser)";
-		default: "Invalid Error Code";
+		default: return "Invalid Error Code";
 	}
 }
 
