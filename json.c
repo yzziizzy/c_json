@@ -255,8 +255,7 @@ static int64_t find_bucket(struct json_obj* obj, uint64_t hash, char* key) {
 static int json_obj_resize(struct json_obj* obj, int newSize) {
 	struct json_obj_field* old, *op;
 	size_t oldlen = obj->alloc_size;
-	size_t i, n;
-	int64_t bi;
+	int64_t i, n, bi;
 	
 	old = op = obj->buckets;
 	
@@ -264,8 +263,11 @@ static int json_obj_resize(struct json_obj* obj, int newSize) {
 	obj->buckets = calloc(1, sizeof(*obj->buckets) * newSize);
 	if(!obj->buckets) return 1;
 	
-	for(i = 0, n = 0; i < oldlen && n < obj->fill; i++) {
-		if(op->key == NULL) continue;
+	for(i = 0, n = 0; i < oldlen && n < (int64_t)obj->fill; i++) {
+		if(op->key == NULL) {
+			op++;
+			continue;
+		}
 		
 		bi = find_bucket(obj, op->hash, op->key);
 		obj->buckets[bi].value = op->value;
@@ -313,7 +315,7 @@ int json_obj_set_key(struct json_value* obj, char* key, struct json_value* val) 
 	o = obj->v.obj;
 	
 	// check size and grow if necessary
-	if(o->fill / o->alloc_size >= 0.75) {
+	if((float)o->fill / (float)o->alloc_size >= 0.75) {
 		json_obj_resize(o, o->alloc_size * 2);
 	}
 	
