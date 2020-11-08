@@ -1903,6 +1903,142 @@ char* json_get_err_str(enum json_error e) {
 	}
 }
 
+struct json_value* json_deep_copy(struct json_value* v) {
+	struct json_value* c;
+
+	c = malloc(sizeof(*c));
+	c->type = v->type;
+
+	switch(v->type) {
+		default:
+		case JSON_TYPE_INT:
+		case JSON_TYPE_DOUBLE:
+			c->v.integer = v->v.integer;
+			c->info.base = v->info.base;
+			break;
+
+		case JSON_TYPE_ARRAY:
+			c->v.arr = malloc(sizeof(*c->v.arr));
+			v->v.arr->length = v->v.arr->length;
+
+			if(v->v.arr->length == 0) {
+				c->v.arr->head = NULL;
+				c->v.arr->tail = NULL;
+			}
+			else {
+				struct json_array_node* cl, *cl_last, *vl;
+				
+				cl_last = NULL;
+				vl = v->v.arr->head;
+				
+				while(vl) {
+					cl = malloc(sizeof(*cl));
+
+					cl->prev = cl_last;
+					if(cl_last) {
+						cl_last->next = cl;
+					}
+					else {
+						c->v.arr->head = cl;
+					}
+
+					cl->value = json_deep_copy(vl->value);
+					
+					cl_last = cl;
+					vl = vl->next;
+				}
+				
+				cl->next = NULL;
+				c->v.arr->tail = cl;
+			}
+
+			break;
+
+		case JSON_TYPE_OBJ:
+			c->v.obj = malloc(sizeof(*c->v.obj));
+			c->v.obj->alloc_size = v->v.obj->alloc_size;
+			c->v.obj->fill = v->v.obj->fill;
+
+			c->v.obj->buckets = calloc(1, sizeof(c->v.obj->buckets) * c->v.obj->alloc_size);
+
+			for(long i = 0, j = 0; j < v->v.obj->fill && i < v->v.obj->alloc_size; i++) {
+				if(v->v.obj->buckets[i].key) { 
+					c->v.obj->buckets[i].key = strdup(v->v.obj->buckets[i].key);	
+					c->v.obj->buckets[i].hash = v->v.obj->buckets[i].hash;
+					c->v.obj->buckets[i].value = json_deep_copy(v->v.obj->buckets[i].value);
+					j++;
+				}
+			}
+
+			break;
+	}
+	
+	return c;
+}
+
+
+// scalar and disparate types take the value of from
+// appends arrays
+// recursively merges objects
+void json_merge(struct json_value* into, struct json_value* from) {
+	
+	// append two arrays
+	if(into->type == JSON_TYPE_ARRAY && from->type == JSON_TYPE_ARRAY) {
+		struct json_array_node* fl;
+
+		fl = from->v.arr->head;
+		while(fl) {
+			json_array_push_tail(into, json_deep_copy(fl->value));
+		}
+
+		return;
+	}
+	
+	// disparate or scalar types
+	if(into->type != JSON_TYPE_OBJ || from->type != JSON_TYPE_OBJ) {
+		
+		// clean out into first
+		if(into->type == JSON_TYPE_ARRAY) {
+			free_array(into->v.arr);
+		}
+		else if(into->type == JSON_TYPE_OBJ) {
+			free_obj(into->v.obj);
+		}
+
+		// deep-copy an array or obect from value
+		if(from->type == JSON_TYPE_ARRAY || from->type == JSON_TYPE_OBJ) {
+			struct json_value* tmp;
+			tmp = json_deep_copy(from);
+			memcpy(into, tmp, sizeof(*into));
+			free(tmp);
+
+			return;
+		}
+		
+		// simple copy of scalars
+		memcpy(into, from, sizeof(*into));
+
+		return;
+	}
+
+	// merge objects
+	void* fi = NULL;
+	char* key;
+	struct json_value* fv;
+
+	while(json_obj_next(from, &fi, &key, &fv)) {
+		struct json_value* iv;
+
+		if(json_obj_get_key(into, key, &iv)) {
+			json_obj_set_key(into, key, json_deep_copy(fv));
+		}
+		else { // key exists in into
+			json_merge(iv, fv);
+		}
+	}
+	
+}
+
 
 
 void spaces(int depth, int w) { return;

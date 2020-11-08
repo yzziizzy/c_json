@@ -202,6 +202,9 @@ int json_obj_length(struct json_value* obj);
 // set iter to NULL to start
 int json_obj_next(struct json_value* val, void** iter, char** key, struct json_value** value);
 
+struct json_value* json_deep_copy(struct json_value* v);
+void json_merge(struct json_value* into, struct json_value* from); 
+
 struct json_file* json_load_path(char* path);
 struct json_file* json_read_file(FILE* f);
 struct json_file* json_parse_string(char* source, size_t len);
