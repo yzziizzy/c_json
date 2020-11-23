@@ -22,6 +22,8 @@ enum token_type {
 	TOKEN_OBJ_END,
 	TOKEN_STRING,
 	TOKEN_NUMBER,
+	TOKEN_TRUE,
+	TOKEN_FALSE,
 	TOKEN_NULL,
 	TOKEN_INFINITY,
 	TOKEN_UNDEFINED,
@@ -40,42 +42,31 @@ struct json_obj_field {
 
 
 struct token {
-	int line_num;
-	int char_num;
 	enum token_type tokenType;
 	struct json_value* val;
 };
 
-struct json_lexer {
+
+struct json_parser {
+	int error;
+
+	// lexing info
 	char* source;
 	char* end;
 	size_t source_len;
+	int eoi;
+	int gotToken;
 	
-	// output info
-	struct token* token_stream;
-	size_t ts_cnt;
-	size_t ts_alloc;
-	
-	// stateful info
 	char* head;
 	int line_num; // these are 1-based
 	int char_num;
-	int error;
-};
-
-
-
-struct json_parser {
-	struct token* token_stream;
-	struct token* cur_token;
-	struct token* last_token;
-	int ts_len;
 	
+	struct token cur_tok;
+	
+	// parsing info
 	struct json_value** stack;
 	int stack_cnt;
 	int stack_alloc;
-	
-	int error;
 };
 
 
@@ -86,6 +77,8 @@ struct json_value* RESUME_ARRAY = (struct json_value*)&RESUME_ARRAY;
 
 // the slot above contains a label, the slot above that contains the object to merge into
 struct json_value* RESUME_OBJ = (struct json_value*)&RESUME_OBJ;
+
+// proper, safe bottom of the stack
 struct json_value* ROOT_VALUE = (struct json_value*)&ROOT_VALUE;
 
 
@@ -94,115 +87,132 @@ static void dbg_print_token(struct token* ts);
 static void dbg_dump_stack(struct json_parser* jp, int depth);
 
 
-struct json_array* json_array_create() {
-
-	struct json_array* arr;
-	
-	arr = malloc(sizeof(*arr));
-	if(!arr) return NULL;
-	
-	arr->length = 0;
-	arr->head = NULL;
-	arr->tail = NULL;
-	
-	return arr;
-}
 
 
-// pushes the tail
-int json_array_push_tail(struct json_value* arr, struct json_value* val) {
+int json_array_push_tail(struct json_value* a, struct json_value* val) {
 
-	struct json_array* a;
-	struct json_array_node* node;
-	
-	a = arr->v.arr;
+	struct json_link* node;
 	
 	node = malloc(sizeof(*node));
 	if(!node) return 1;
 	
 	node->next = NULL;
-	node->prev = a->tail;
-	node->value = val;
+	node->prev = a->arr.tail;
+	node->v = val;
 	
-	if(a->length == 0) {
-		a->head = node;
+	if(a->len == 0) {
+		a->arr.head = node;
 	}
 	else {
-		a->tail->next = node;
+		a->arr.tail->next = node;
 	}
 	
-	a->tail = node;
-	a->length++;
+	a->arr.tail = node;
+	a->len++;
+	
+	return 0;
+}
+
+struct json_value* json_array_pop_tail(struct json_value* a) {
+
+	struct json_value* v;
+	struct json_link* t;
+	
+	if(a->len == 0) {
+		return NULL;
+	}
+	
+	a->len--;
+	
+	v = a->arr.tail->v;
+	
+	if(a->len > 0) {
+		t = a->arr.tail;
+		a->arr.tail = a->arr.tail->prev;
+		a->arr.tail->next = NULL;
+	}
+	else {
+		a->arr.head = a->arr.tail = NULL;
+	}
+	
+	free(t);
+	
+	return v;
+}
+
+
+int json_array_push_head(struct json_value* a, struct json_value* val) {
+
+	struct json_link* node;
+	
+	node = malloc(sizeof(*node));
+	if(!node) return 1;
+	
+	node->prev = NULL;
+	node->next = a->arr.head;
+	node->v = val;
+	
+	if(a->len == 0) {
+		a->arr.tail = node;
+	}
+	else {
+		a->arr.head->next = node;
+	}
+	
+	a->arr.head = node;
+	a->len++;
 	
 	return 0;
 }
 
 // pops the tail
-int json_array_pop_tail(struct json_value* arr, struct json_value** val) {
+struct json_value* json_array_pop_head(struct json_value* a) {
 
-	struct json_array* a;
-	struct json_array_node* t;
+	struct json_value* v;
+	struct json_link* t;
 	
-	a = arr->v.arr;
-	
-	if(a->length == 0) {
-		return 1;
+	if(a->len == 0) {
+		return NULL;
 	}
 	
-	a->length--;
+	a->len--;
 	
-	*val = a->tail->value;
+	v = a->arr.head->v;
 	
-	if(a->length > 0) {
-		t = a->tail;
-		a->tail = a->tail->prev;
-		a->tail->next = NULL;
+	if(a->len > 0) {
+		t = a->arr.head;
+		a->arr.head = a->arr.head->prev;
+		a->arr.head->next = NULL;
 	}
 	else {
-		a->head = a->tail = NULL;
+		a->arr.tail = a->arr.head = NULL;
 	}
 	
 	free(t);
 	
-	return 0;
+	return v;
 }
 
 
-size_t json_array_length(struct json_value* arr) {
+size_t json_array_calc_length(struct json_value* a) {
 	size_t len;
-	struct json_array_node* n;
+	struct json_link* n;
 	
-	if(arr->type != JSON_TYPE_ARRAY) {
+	if(a->type != JSON_TYPE_ARRAY) {
 		return 0;
 	}
 	
 	len = 0;
-	n = arr->v.arr->head;
+	n = a->arr.head;
 	while(n) {
 		len++;
 		n = n->next;
 	}
 	
+	// update the cached value too
+	a->len = len;
+	
 	return len;
-}
-
-
-struct json_obj* json_obj_create(size_t initial_alloc_size) {
-	
-	struct json_obj* obj;
-
-	obj = malloc(sizeof(*obj));
-	if(!obj) return NULL;
-	
-	obj->fill = 0;
-	obj->alloc_size = initial_alloc_size;
-	obj->buckets = calloc(1, sizeof(*obj->buckets) * obj->alloc_size);
-	if(!obj->buckets) {
-		free(obj);
-		return NULL;
-	}
-	
-	return obj;
 }
 
 
@@ -218,15 +228,15 @@ static uint64_t hash_key(char* key, size_t len) {
 	return hash[0];
 }
 
-static int64_t find_bucket(struct json_obj* obj, uint64_t hash, char* key) {
+static int64_t find_bucket(struct json_value* obj, uint64_t hash, char* key) {
 	int64_t startBucket, bi;
 	
-	bi = startBucket = hash % obj->alloc_size; 
+	bi = startBucket = hash % obj->obj.alloc_size; 
 	
 	do {
 		struct json_obj_field* bucket;
 		
-		bucket = &obj->buckets[bi];
+		bucket = &obj->obj.buckets[bi];
 		
 		// empty bucket
 		if(bucket->key == NULL) {
@@ -242,7 +252,7 @@ static int64_t find_bucket(struct json_obj* obj, uint64_t hash, char* key) {
 			// collision, probe next bucket
 		}
 		
-		bi = (bi + 1) % obj->alloc_size;
+		bi = (bi + 1) % obj->obj.alloc_size;
 	} while(bi != startBucket);
 	
 	printf("CJSON: error in find_bucket\n");
@@ -252,27 +262,27 @@ static int64_t find_bucket(struct json_obj* obj, uint64_t hash, char* key) {
 
 
 // should always be called with a power of two
-static int json_obj_resize(struct json_obj* obj, int newSize) {
+static int json_obj_resize(struct json_value* obj, int newSize) {
 	struct json_obj_field* old, *op;
-	size_t oldlen = obj->alloc_size;
+	size_t oldlen = obj->obj.alloc_size;
 	int64_t i, n, bi;
 	
-	old = op = obj->buckets;
+	old = op = obj->obj.buckets;
 	
-	obj->alloc_size = newSize;
-	obj->buckets = calloc(1, sizeof(*obj->buckets) * newSize);
-	if(!obj->buckets) return 1;
+	obj->obj.alloc_size = newSize;
+	obj->obj.buckets = calloc(1, sizeof(*obj->obj.buckets) * newSize);
+	if(!obj->obj.buckets) return 1;
 	
-	for(i = 0, n = 0; i < oldlen && n < (int64_t)obj->fill; i++) {
+	for(i = 0, n = 0; i < oldlen && n < (int64_t)obj->len; i++) {
 		if(op->key == NULL) {
 			op++;
 			continue;
 		}
 		
 		bi = find_bucket(obj, op->hash, op->key);
-		obj->buckets[bi].value = op->value;
-		obj->buckets[bi].hash = op->hash;
-		obj->buckets[bi].key = op->key;
+		obj->obj.buckets[bi].value = op->value;
+		obj->obj.buckets[bi].hash = op->hash;
+		obj->obj.buckets[bi].key = op->key;
 		
 		n++;
 		op++;
@@ -290,19 +300,16 @@ static int json_obj_resize(struct json_obj* obj, int newSize) {
 int json_obj_get_key(struct json_value* obj, char* key, struct json_value** val) {
 	uint64_t hash;
 	int64_t bi;
-	struct json_obj* o;
-	
-	o = obj->v.obj;
 	
 	hash = hash_key(key, -1);
 	
-	bi = find_bucket(o, hash, key);
-	if(bi < 0 || o->buckets[bi].key == NULL) {
+	bi = find_bucket(obj, hash, key);
+	if(bi < 0 || obj->obj.buckets[bi].key == NULL) {
 		*val = NULL;
 		return 1;
 	}
 	
-	*val = o->buckets[bi].value; 
+	*val = obj->obj.buckets[bi].value; 
 	return 0;
 }
 
@@ -310,47 +317,35 @@ int json_obj_get_key(struct json_value* obj, char* key, struct json_value** val)
 int json_obj_set_key(struct json_value* obj, char* key, struct json_value* val) {
 	uint64_t hash;
 	int64_t bi;
-	struct json_obj* o;
-	
-	o = obj->v.obj;
 	
 	// check size and grow if necessary
-	if((float)o->fill / (float)o->alloc_size >= 0.75) {
-		json_obj_resize(o, o->alloc_size * 2);
+	if((float)obj->len / (float)obj->obj.alloc_size >= 0.75) {
+		json_obj_resize(obj, obj->obj.alloc_size * 2);
 	}
 	
 	hash = hash_key(key, -1);
 	
-	bi = find_bucket(o, hash, key);
+	bi = find_bucket(obj, hash, key);
 	if(bi < 0) return 1;
 	
-	o->buckets[bi].value = val;
-	o->buckets[bi].key = key;
-	o->buckets[bi].hash = hash;
-	o->fill++;
+	obj->obj.buckets[bi].value = val;
+	obj->obj.buckets[bi].key = key;
+	obj->obj.buckets[bi].hash = hash;
+	obj->len++;
 	
 	return 0;
 }
 
 
-// will probably be changed or removed later
-// coerces and strdup's the result
-// returns null if the key does not exist
-char* json_obj_key_as_string(struct json_value* obj, char* key) {
-	json_value_t* val;
-	char* str;
-	
-	if(json_obj_get_key(obj, key, &val)) {
-		return NULL;
-	}
-	
-	json_as_string(val, &str);
-	return strdup(str);
+
+char* json_obj_get_strdup(struct json_value* obj, char* key) {
+	char* s = json_obj_get_str(obj, key);
+	return s ? strdup(s) : NULL;
 }
 
 
 // returns pointer to the internal string, or null if it's not a string
-char* json_obj_get_string(struct json_value* obj, char* key) {
+char* json_obj_get_str(struct json_value* obj, char* key) {
 	json_value_t* val;
 	
 	if(json_obj_get_key(obj, key, &val)) {
@@ -361,7 +356,7 @@ char* json_obj_get_string(struct json_value* obj, char* key) {
 		return NULL;
 	}
 	
-	return val->v.str;
+	return val->s;
 }
 
 // returns an integer or the default value if it's not an integer
@@ -376,7 +371,7 @@ int64_t json_obj_get_int(struct json_value* obj, char* key, int64_t def) {
 		return def;
 	}
 	
-	return val->v.integer;
+	return val->n;
 }
 
 // returns a double or the default value if it's not an integer
@@ -391,7 +386,7 @@ double json_obj_get_double(struct json_value* obj, char* key, double def) {
 		return def;
 	}
 	
-	return val->v.dbl;
+	return val->d;
 }
 
 
@@ -407,35 +402,27 @@ struct json_value* json_obj_get_val(struct json_value* obj, char* key) {
 }
 
 
-// number of keys in an object
-// -1 on error
-int json_obj_length(struct json_value* val) {
-	if(val->type != JSON_TYPE_OBJ) return -1;
-	
-	return val->v.obj->fill;
-}
-
 
 // iteration. no order. results undefined if modified while iterating
 // returns 0 when there is none left
 // set iter to NULL to start
-int json_obj_next(struct json_value* val, void** iter, char** key, struct json_value** value) { 
+int json_obj_next(struct json_value* obj, void** iter, char** key, struct json_value** value) { 
 	struct json_obj_field* b = *iter;
-	struct json_obj* obj;
+//	struct json_obj* obj;
 	
-	if(val->type != JSON_TYPE_OBJ) return 1;
-	obj = val->v.obj;
+	if(obj->type != JSON_TYPE_OBJ) return 1;
 	
-	if(obj->fill == 0) {
+	
+	if(obj->len == 0) {
 		return 0;
 	}
 	
 	// a tiny bit of idiot-proofing
-	if(b == NULL) b = &obj->buckets[-1];
+	if(b == NULL) b = &obj->obj.buckets[-1];
 	//printf("alloc size: %d\n", obj->alloc_size);
 	do {
 		b++;
-		if(b >= obj->buckets + obj->alloc_size) {
+		if(b >= obj->obj.buckets + obj->obj.alloc_size) {
 			//printf("ending next\n");
 			// end of the list
 			*value = NULL;
@@ -488,7 +475,7 @@ int json_obj_unpack_struct(int count, struct json_value* obj, ...) {
 
 /*
 returns an array of char* pairs, key then value
-*/
+
 int json_obj_unpack_string_array(struct json_value* obj, char*** out, size_t* len) {
 	char** a;
 	size_t l, i;
@@ -508,7 +495,7 @@ int json_obj_unpack_string_array(struct json_value* obj, char*** out, size_t* le
 	}
 	o = obj->v.obj;
 	
-	l = o->fill;
+	l = o->len;
 	if(l <= 0) {
 		return 2;
 	}
@@ -532,6 +519,7 @@ int json_obj_unpack_string_array(struct json_value* obj, char*** out, size_t* le
 	
 	return 0;
 }
+*/
 
 
 /*
@@ -543,6 +531,8 @@ string/comment -> string = string
 number -> string = sprintf, accoding to some nice rules.
 string -> number = strtod/i
 
+strings are dup'd
+
 JSON_TYPE_INT is assumed to be C int
 
 numbers over 2^63 are not properly supported yet. they will be truncated to 0
@@ -553,64 +543,77 @@ int json_as_type(struct json_value* v, enum json_type t, void* out) {
 	int ret;
 	int64_t i;
 	double d;
+	char* s;
 	
 	if(!v) return 1;
 	
 	switch(t) { // actual type
 
 		case JSON_TYPE_INT:
-			ret = json_as_int(v, &i);
-			if(!ret) *((int*)out) = i;
+			i = json_as_int(v);
+			*((int*)out) = i;
 			return 0;
 			
-		case JSON_TYPE_DOUBLE: return json_as_double(v, out);
-		case JSON_TYPE_STRING: return json_as_string(v, out);
+		case JSON_TYPE_DOUBLE: 
+			d = json_as_double(v);
+			*((double*)out) = d;
+			return 0;
+			
+		case JSON_TYPE_STRING:
+			s = json_as_strdup(v);
+			*((char**)out) = s;
+			return 0;
 		
-		case JSON_TYPE_OBJ: *((struct json_obj**)out) = v->v.obj; return 0;
-		case JSON_TYPE_ARRAY: *((struct json_array**)out) = v->v.arr; return 0;
+		case JSON_TYPE_OBJ: 
+		case JSON_TYPE_ARRAY: 
+			*((struct json_value**)out) = v; 
+			return 0;
 
 			
 		case JSON_TYPE_FLOAT:
-			ret = json_as_double(v, &d);
-			if(!ret) *((float*)out) = d;
-			return ret;
+			d = json_as_double(v);
+			*((float*)out) = d;
+			return 0;
 			
 		case JSON_TYPE_INT8:
-			ret = json_as_int(v, &i);
-			if(!ret) *((int8_t*)out) = i;
-			return ret;
+			i = json_as_int(v);
+			*((int8_t*)out) = i;
+			return 0;
 			
 		case JSON_TYPE_INT16:
-			ret = json_as_int(v, &i);
-			if(!ret) *((int16_t*)out) = i;
-			return ret;
+			i = json_as_int(v);
+			*((int16_t*)out) = i;
+			return 0;
 			
 		case JSON_TYPE_INT32: 
-			ret = json_as_int(v, &i);
-			if(!ret) *((int32_t*)out) = i;
-			return ret;
+			i = json_as_int(v);
+			*((int32_t*)out) = i;
+			return 0;
 			
-		case JSON_TYPE_INT64: return json_as_double(v, out);
-		
+		case JSON_TYPE_INT64: 
+			i = json_as_int(v);
+			*((int64_t*)out) = i;
+			return 0;
+			
 		case JSON_TYPE_UINT8:
-			ret = json_as_int(v, &i);
-			if(!ret) *((uint8_t*)out) = i;
-			return ret;
+			i = json_as_int(v);
+			*((uint8_t*)out) = i;
+			return 0;
 			
 		case JSON_TYPE_UINT16:
-			ret = json_as_int(v, &i);
-			if(!ret) *((uint16_t*)out) = i;
-			return ret;
+			i = json_as_int(v);
+			*((uint16_t*)out) = i;
+			return 0;
 			
 		case JSON_TYPE_UINT32: 
-			ret = json_as_int(v, &i);
-			if(!ret) *((uint32_t*)out) = i;
-			return ret;
+			i = json_as_int(v);
+			*((uint32_t*)out) = i;
+			return 0;
 			
 		case JSON_TYPE_UINT64: 
-			ret = json_as_int(v, &i);
-			if(!ret) *((uint64_t*)out) = i;
-			return ret;
+			i = json_as_int(v);
+			*((uint64_t*)out) = i;
+			return 0;
 			
 		case JSON_TYPE_UNDEFINED:
 		case JSON_TYPE_NULL:
@@ -625,62 +628,52 @@ int json_as_type(struct json_value* v, enum json_type t, void* out) {
 }
 
 // returns 0 for success
-int json_as_int(struct json_value* v, int64_t* out) {
+int64_t json_as_int(struct json_value* v) {
 	switch(v->type) { // actual type
 		case JSON_TYPE_UNDEFINED:
 		case JSON_TYPE_NULL:
-			*out = 0;
 			return 0;
 			
 		case JSON_TYPE_INT:
-			*out = v->v.integer;
-			return 0;
+			return v->n;
 			
 		case JSON_TYPE_DOUBLE:
-			*out = v->v.dbl;
-			return 0;
+			return v->d;
 			
 		case JSON_TYPE_STRING:
-			*out = strtol(v->v.str, NULL, 0);
-			return 0;
+			return strtol(v->s, NULL, 0);
 			
 		case JSON_TYPE_OBJ:
 		case JSON_TYPE_ARRAY:
 		case JSON_TYPE_COMMENT_SINGLE:
 		case JSON_TYPE_COMMENT_MULTI:
 		default:
-			*out = 0;
-			return 1;
+			return 0;
 	}
 }
 
 // returns 0 for success
-int json_as_double(struct json_value* v, double* out) {
+double json_as_double(struct json_value* v) {
 	switch(v->type) { // actual type
 		case JSON_TYPE_UNDEFINED:
 		case JSON_TYPE_NULL:
-			*out = 0.0;
-			return 0;
+			return 0.0;
 			
 		case JSON_TYPE_INT:
-			*out = v->v.integer;
-			return 0;
+			return v->n;
 			
 		case JSON_TYPE_DOUBLE:
-			*out = v->v.dbl;
-			return 0;
+			return v->d;
 			
 		case JSON_TYPE_STRING:
-			*out = strtod(v->v.str, NULL);
-			return 0;
+			return strtod(v->s, NULL);
 			
 		case JSON_TYPE_OBJ:
 		case JSON_TYPE_ARRAY:
 		case JSON_TYPE_COMMENT_SINGLE:
 		case JSON_TYPE_COMMENT_MULTI:
 		default:
-			*out = 0.0;
-			return 1;
+			return 0.0;
 	}
 }
 
@@ -705,67 +698,53 @@ static char* a_sprintf(char* fmt, ...) {
 }
 
 // returns 0 for success
-int json_as_string(struct json_value* v, char** out) {
+char* json_as_strdup(struct json_value* v) {
 	char* buf;
 	size_t len;
 	
 	switch(v->type) { // actual type
 		case JSON_TYPE_UNDEFINED:
-			*out = "undefined";
-			return 0;
+			return strdup("undefined");
 			
 		case JSON_TYPE_NULL:
-			*out = "null";
-			return 0;
+			return strdup("null");
 			
 		case JSON_TYPE_INT:
-			*out = a_sprintf("%ld", v->v.integer); // BUG might leak memory
-			return 0;
+			return a_sprintf("%ld", v->n); // BUG might leak memory
 			
 		case JSON_TYPE_DOUBLE:
-			*out = a_sprintf("%f", v->v.dbl);
-			return 0;
+			return a_sprintf("%f", v->d);
 			
 		case JSON_TYPE_COMMENT_SINGLE:
 		case JSON_TYPE_COMMENT_MULTI:
 		case JSON_TYPE_STRING:
-			*out = v->v.str;
-			return 0;
+			return strdup(v->s);
 			
 		case JSON_TYPE_OBJ:
-			*out = "[Object]";
-			return 0;
+			return strdup("[Object]");
 			
 		case JSON_TYPE_ARRAY:
-			*out = "[Array]";
-			return 0;
+			return strdup("[Array]");
 		
 		default:
-			*out = "";
-			return 1;
+			return strdup("");
 	}
 }
 
 
-int json_as_float(struct json_value* v, float* f) {
-	return json_as_type(v, JSON_TYPE_FLOAT, f); 
+float json_as_float(struct json_value* v) {
+	return json_as_double(v); 
 }
 
 
 
-
-#define check_oom(x) \
-if(x == NULL) { \
-	jl->error = JSON_ERROR_OOM; \
-	return 1; \
-}
 
 // out must be big enough, at least as big as in+1 just to be safe
 // appends a null to out, but is also null-safe
-static int decode_c_escape_str(char* in, char* out, size_t len) {
-	int i;
+static int decode_c_escape_str(char* in, char* out, size_t len, size_t* outLen) {
+	size_t i, o;
 	
-	for(i = 0; i < len; i++) {
+	for(i = 0, o = 0; i < len; i++, o++) {
 		if(*in == '\\') {
 			in++;
 			i++;
@@ -807,12 +786,22 @@ static int decode_c_escape_str(char* in, char* out, size_t len) {
 	}
 	
 	*out = '\0';
+	if(outLen) *outLen = o; 
 	
 	return 0;
 }
 
+
+
+
+///////////////////
+//    Parser     //
+///////////////////
+
+
+
 // move forward one char
-static void lex_next_char(struct json_lexer* jl) {
+static void lex_next_char(struct json_parser* jl) {
 	if(jl->error) { 
 		printf("next char has error\n");
 		return;
@@ -833,40 +822,24 @@ static void lex_next_char(struct json_lexer* jl) {
 
 
 // returns erro code.
-static int lex_push_token_val(struct json_lexer* jl, enum token_type t, struct json_value* val) {
-	size_t cnt, alloc;
-	void* tmp;
+static int lex_push_token_val(struct json_parser* jp, enum token_type t, struct json_value* val) {
 	
-	cnt = jl->ts_cnt;
-	
-	// check size
-	if(cnt >= jl->ts_alloc) {
-		if(jl->ts_alloc == 0) jl->ts_alloc = 64;
-		jl->ts_alloc *= 2;
-		tmp = realloc(jl->token_stream, jl->ts_alloc * sizeof(*(jl->token_stream)));
-		check_oom(tmp)
-		
-		jl->token_stream = tmp;
-	}
-	
-	// copy data
-	jl->token_stream[cnt].line_num = jl->line_num;
-	jl->token_stream[cnt].char_num = jl->char_num;
-	jl->token_stream[cnt].tokenType = t;
-	jl->token_stream[cnt].val = val;
-	
-	jl->ts_cnt++;
+	jp->gotToken = 1;
+	jp->cur_tok.tokenType = t;
+	jp->cur_tok.val = val;
 	
 	return 0;
 }
 
+
+
 // returns error code. val set to null
-static int lex_push_token(struct json_lexer* jl, enum token_type t) {
+static int lex_push_token(struct json_parser* jl, enum token_type t) {
 	return lex_push_token_val(jl, t, NULL);
 }
 
 
-static int lex_string_token(struct json_lexer* jl) {
+static int lex_string_token(struct json_parser* jl) {
 	size_t len;
 	struct json_value* val;
 	char* str;
@@ -898,26 +871,20 @@ static int lex_string_token(struct json_lexer* jl) {
 			return 1;
 		}
 	}
-	//printf("error: %d\n", jl->error);
 	
 	len = se - jl->head - 1;
 	
 	str = malloc(len+1);
-	check_oom(str)
 	
-	//printf("error: %d\n", jl->error);
-	
-	if(decode_c_escape_str(jl->head + 1, str, len)) {
+	if(decode_c_escape_str(jl->head + 1, str, len, NULL)) {
 		jl->error = JSON_LEX_ERROR_INVALID_STRING;
 		return 1;
 	}
-//printf("error: %d\n", jl->error);
+	
 	// json value
 	val = calloc(1, sizeof(*val));
-	check_oom(val)
-//	printf("error: %d\n", jl->error);
 	val->type = JSON_TYPE_STRING;
-	val->v.str = str;
+	val->s = str;
 	
 	lex_push_token_val(jl, TOKEN_STRING, val);
 	
@@ -926,14 +893,12 @@ static int lex_string_token(struct json_lexer* jl) {
 	jl->char_num = char_num;
 	jl->line_num += lines;
 	
-//	printf("head %c\n", *jl->head);
-//	printf("lc/line/char [%d/%d/%d]\n", jl->head - jl->source, jl->line_num, jl->char_num);
 	
 	return 0;
 }
 
 
-static int lex_number_token(struct json_lexer* jl) {
+static int lex_number_token(struct json_parser* jl) {
 	char* start, *s, *e;
 	int is_float = 0;
 	int negate =0;
@@ -964,9 +929,9 @@ static int lex_number_token(struct json_lexer* jl) {
 	// read the value
 	if(is_float) {
 		base = -1;
-		val->v.dbl = strtod(s, &e);
+		val->d = strtod(s, &e);
 		val->type = JSON_TYPE_DOUBLE;
-		if(negate) val->v.dbl *= -1;
+		if(negate) val->d *= -1;
 	}
 	else {
 		if(*s == '0') {
@@ -982,12 +947,12 @@ static int lex_number_token(struct json_lexer* jl) {
 		}
 		else base = 10;
 		
-		val->v.integer = strtol(s, &e, base);
+		val->n = strtol(s, &e, base);
 		val->type = JSON_TYPE_INT;
-		if(negate) val->v.integer *= -1;
+		if(negate) val->n *= -1;
 	}
 	
-	val->info.base = base;
+	val->base = base;
 	
 	lex_push_token_val(jl, TOKEN_NUMBER, val);
 	
@@ -1002,7 +967,7 @@ static int lex_number_token(struct json_lexer* jl) {
 }
 
 
-static int lex_label_token(struct json_lexer* jl) {
+static int lex_label_token(struct json_parser* jl) {
 	size_t len;
 	struct json_value* val;
 	char* str;
@@ -1010,6 +975,37 @@ static int lex_label_token(struct json_lexer* jl) {
 	
 	int char_num = jl->char_num;
 
+	// check for boolean literals
+	// TODO: proper ident char checking
+	if(0 == strncasecmp(se, "true", strlen("true"))) {
+		if(!isalnum(se[strlen("true")]) && se[strlen("true")] != '_') {
+			lex_push_token_val(jl, TOKEN_TRUE, json_new_strn(se, strlen("true")));
+			jl->head += strlen("true");
+			return 0;
+		}
+	}
+	if(0 == strncasecmp(se, "false", strlen("false"))) {
+		if(!isalnum(se[strlen("false")]) && se[strlen("true")] != '_') {
+			lex_push_token_val(jl, TOKEN_FALSE, json_new_strn(se, strlen("false")));
+			jl->head += strlen("false");
+			return 0;
+		}
+	}
+	if(0 == strncasecmp(se, "null", strlen("null"))) {
+		if(!isalnum(se[strlen("null")]) && se[strlen("null")] != '_') {
+			lex_push_token_val(jl, TOKEN_FALSE, json_new_strn(se, strlen("null")));
+			jl->head += strlen("null");
+			return 0;
+		}
+	}
+	if(0 == strncasecmp(se, "undefined", strlen("undefined"))) {
+		if(!isalnum(se[strlen("undefined")]) && se[strlen("undefined")] != '_') {
+			lex_push_token_val(jl, TOKEN_FALSE, json_new_strn(se, strlen("undefined")));
+			jl->head += strlen("undefined");
+			return 0;
+		}
+	}
+	
 	//printf("error: %d\n", jl->error);
 	// find len, count lines
 	while(1) {
@@ -1027,26 +1023,18 @@ static int lex_label_token(struct json_lexer* jl) {
 			return 1;
 		}
 	}
-	//printf("error: %d\n", jl->error);
 	
 	len = se - jl->head;
 	// TODO: check for null, infinity, undefined, nan
 	
 	str = malloc(len+1);
-	check_oom(str)
-	
-	//printf("error: %d\n", jl->error);
-	
 	strncpy(str, jl->head, len);
-	str[len] = 0;// BUG sometiems this gets messed up?
+	str[len] = 0;
 	
-// printf("error: %d\n", jl->error);
 	// json value
 	val = calloc(1, sizeof(*val));
-	check_oom(val)
-	//printf("error: %d\n", jl->error);
 	val->type = JSON_TYPE_STRING;
-	val->v.str = str;
+	val->s = str;
 	
 	lex_push_token_val(jl, TOKEN_LABEL, val);
 	
@@ -1062,7 +1050,7 @@ static int lex_label_token(struct json_lexer* jl) {
 
 
 
-static int lex_comment_token(struct json_lexer* jl) {
+static int lex_comment_token(struct json_parser* jl) {
 	char* start, *se, *str;
 	char delim;
 	size_t len;
@@ -1160,88 +1148,69 @@ static int lex_comment_token(struct json_lexer* jl) {
 }
 
 // returns false when there is no more input
-static int lex_nibble(struct json_lexer* jl) {
-	
-	char c = *jl->head;
-	
-	switch(c) {
-		case '{': lex_push_token(jl, TOKEN_OBJ_START); break;
-		case '}': lex_push_token(jl, TOKEN_OBJ_END); break;
-		case '[': lex_push_token(jl, TOKEN_ARRAY_START); break;
-		case ']': lex_push_token(jl, TOKEN_ARRAY_END); break;
-		case ',': lex_push_token(jl, TOKEN_COMMA); break;
-		case ':': lex_push_token(jl, TOKEN_COLON); break;
-		
-		case '/': lex_comment_token(jl); break;
-		
-		case '\'':
-		case '"':
-		case '`':
-			lex_string_token(jl);
-			break;
-		
-		case '0': case '1': case '2': case '3': case '4': 
-		case '5': case '6': case '7': case '8': case '9':
-		case '-': case '+': case '.':
-			lex_number_token(jl);
-			break;
-		
-		case ' ':
-		case '\t':
-		case '\r':
-		case '\f':
-		case '\v':
-		case '\n':
-			break;
-			
-		default:
-			if(isalpha(c) || c == '_' || c == '$') {
-				lex_label_token(jl);
-				break;
-			}
-			
-			// lex error
-			jl->error = JSON_LEX_ERROR_INVALID_CHAR;
-			return 1;
-	}
-	
-	//printf("lol\n");
-	
-	lex_next_char(jl);
-	
-	return jl->error || jl->head >= jl->end;
-}
 
-// this is the lexer
-static struct json_lexer* tokenize_string(char* source, size_t len) {
-	
-	struct json_lexer* jl;
-	
-	char open;
-	char* data;
-	char* start;
+//       formerly lex_nibble()
+static int lex_next_token(struct json_parser* jl) {
 	
 	
-	// set up the lexer struct
-	jl = calloc(1, sizeof(*jl));
-	if(!jl) return NULL;
+	jl->gotToken = 0;
 	
-	jl->source = source;
-	jl->end = source + len;
-	jl->source_len = len;
+	while(!jl->gotToken) {
+		char c = *jl->head;
 	
-	jl->head = source;
-	jl->line_num = 1; // these are 1-based
-	jl->char_num = 1;
-	
-	// all the work done here
-	while(!lex_nibble(jl));// printf("*");
-	
-	if(jl->error) {
-		printf("error code: %d\n", jl->error);
+		switch(c) {
+			case '{': lex_push_token(jl, TOKEN_OBJ_START); break;
+			case '}': lex_push_token(jl, TOKEN_OBJ_END); break;
+			case '[': lex_push_token(jl, TOKEN_ARRAY_START); break;
+			case ']': lex_push_token(jl, TOKEN_ARRAY_END); break;
+			case ',': lex_push_token(jl, TOKEN_COMMA); break;
+			case ':': lex_push_token(jl, TOKEN_COLON); break;
+			
+			case '/': lex_comment_token(jl); break;
+			
+			case '\'':
+			case '"':
+			case '`':
+				lex_string_token(jl);
+				break;
+			
+			case '0': case '1': case '2': case '3': case '4': 
+			case '5': case '6': case '7': case '8': case '9':
+			case '-': case '+': case '.':
+				lex_number_token(jl);
+				break;
+			
+			case ' ':
+			case '\t':
+			case '\r':
+			case '\f':
+			case '\v':
+			case '\n':
+				break;
+				
+			default:
+				if(isalpha(c) || c == '_' || c == '$') {
+					lex_label_token(jl);
+					break;
+				}
+				
+				// lex error
+				jl->error = JSON_LEX_ERROR_INVALID_CHAR;
+				return 1;
+		}
+		
+		//printf("lol\n");
+		
+		lex_next_char(jl);
 	}
 	
-	return jl;
+	//printf("token %d:%d ", jl->line_num, jl->char_num);
+	dbg_print_token(&jl->cur_tok);
+	
+	jl->eoi = jl->head >= jl->end;
+	
+	if(jl->error) return jl->error;
+	return jl->eoi;
 }
 
 static int parser_indent_level = 0;
@@ -1290,7 +1259,6 @@ static struct json_value* parser_pop(struct json_parser* jp) {
 static void parser_push_new_array(struct json_parser* jp) {
 	
 	struct json_value* val;
-	struct json_array* arr;
 	
 	val = malloc(sizeof(*val));
 	if(!val) {
@@ -1298,14 +1266,11 @@ static void parser_push_new_array(struct json_parser* jp) {
 		return;
 	}
 	
-	arr = json_array_create();
-	if(!arr) {
-		jp->error = JSON_ERROR_OOM;
-		return;
-	}
-	
 	val->type = JSON_TYPE_ARRAY;
-	val->v.arr = arr;
+	val->len = 0;
+	val->base = 0;
+	val->arr.head = NULL;
+	val->arr.tail = NULL;
 	
 	parser_push(jp, val);
 }
@@ -1313,18 +1278,13 @@ static void parser_push_new_array(struct json_parser* jp) {
 static void parser_push_new_object(struct json_parser* jp) {
 	
 	struct json_value* val;
-	struct json_obj* obj;
 	
-	val = malloc(sizeof(*val));
+	val = json_new_object(8);
 	if(!val) {
 		jp->error = JSON_ERROR_OOM;
 		return;
 	}
 	
-	obj = json_obj_create(4);
-	
-	val->type = JSON_TYPE_OBJ;
-	val->v.obj = obj;
 	
 // 	printf("vt: %d\n", val);
 	dbg_dump_stack(jp, 3);
@@ -1332,37 +1292,20 @@ static void parser_push_new_object(struct json_parser* jp) {
 	dbg_dump_stack(jp, 4);
 }
 
-// parser helper
-static inline struct token* consume_token(struct json_parser* jp) {
-	if(jp->cur_token > jp->last_token) {
-		jp->error = JSON_PARSER_ERROR_UNEXPECTED_EOI;
-		return NULL;
-	}
-	
-	dbg_parser_indent();
-	dbg_printf("ct-%d-", jp->cur_token[1].line_num); dbg_print_token(jp->cur_token + 1);
-	
-	return ++jp->cur_token;
-}
-
 
 // not used atm. comments will probably be moved to a side channel
 static void consume_comments(struct json_parser* jp) {
 	while(1) {
-		if(jp->cur_token->tokenType != TOKEN_COMMENT) break;
+		if(jp->cur_tok.tokenType != TOKEN_COMMENT) break;
 		
-		parser_push(jp, jp->cur_token->val);
-		consume_token(jp);
+		parser_push(jp, jp->cur_tok.val);
+		lex_next_token(jp);
 	}
 }
 
 static void consume_commas(struct json_parser* jp) {
-	while(1) {
-		if(jp->cur_token[1].tokenType != TOKEN_COMMA) break;
-		
-		//parser_push(jp, jp->cur_token->val);
-		consume_token(jp);
-	}
+//	lex_next_token(jp);
+	while(jp->cur_tok.tokenType == TOKEN_COMMA) lex_next_token(jp);
 }
 
 static void reduce_array(struct json_parser* jp) {
@@ -1419,55 +1362,62 @@ static void reduce_object(struct json_parser* jp) {
 	dbg_dump_stack(jp, 10);
 	if(obj->type != JSON_TYPE_OBJ) { printf("invalid obj\n");
 		
-		/*
+		
 		dbg_printf("0 type: %d \n", v->type);
 		dbg_printf("1 type: %d \n", l->type);
 		dbg_printf("2 type: %d \n", obj->type);
 		dbg_printf("3 type: %d \n", st[-3]->type);
-		*/
+		
 		jp->error = JSON_PARSER_ERROR_CORRUPT_STACK;
 		return;
 	}
 	
 	// insert l:v into obj
-	json_obj_set_key(obj, l->v.str, v);
+	json_obj_set_key(obj, l->s, v);
 	// BUG? free label value?
 	
 	jp->stack_cnt -= 2;
 }
 
 
-static struct json_parser* parse_token_stream(struct json_lexer* jl) {
+static struct json_parser* parse_token_stream(char* source, size_t len) {
 	
 	int i;
 	struct json_parser* jp;
-	struct token* tok;
 	
 	jp = calloc(1, sizeof(*jp));
 	if(!jp) {
 		return NULL;
 	}
 	
-	tok = jl->token_stream;
-	jp->token_stream = jl->token_stream;
-	jp->cur_token = jl->token_stream;
-	jp->last_token = jl->token_stream + jl->ts_cnt;
-
+	jp->source = source;
+	jp->end = source + len;
+	jp->source_len = len;
+	
+	jp->head = source;
+	jp->line_num = 1; // these are 1-based
+	jp->char_num = 1;
+	
 	i = 0;
 
-#define next() if(!(tok = consume_token(jp))) goto UNEXPECTED_EOI;
+#define next() lex_next_token(jp); //) goto UNEXPECTED_EOI;
+#define is_end() if(jp->eoi) goto UNEXPECTED_EOI;
 
 	// the root value sentinel helps a few algorithms and marks a proper end of input
 	parser_push(jp, ROOT_VALUE);
+	
+	// get the first token
+	lex_next_token(jp);
 
-	PARSE_ARRAY:
+	PARSE_ARRAY: // not actually starting with an array; this is just the type probing code
 		dbg_parser_indent();
-		dbg_printf("\nparse_array\n");
+		dbg_printf("\nparse_array l:%d, c:%d \n", jp->line_num, jp->char_num);
 		
-		if(jp->cur_token >= jp->last_token) goto CHECK_END;
+		
+		if(jp->eoi) goto CHECK_END;
 	
 		// cycle: val, comma
-		switch(tok->tokenType) {
+		switch(jp->cur_tok.tokenType) {
 		
 			case TOKEN_ARRAY_START: dbg_parser_indent();dbg_printf("TOKEN_ARRAY_START\n");
 				parser_indent_level++;
@@ -1496,23 +1446,27 @@ static struct json_parser* parse_token_stream(struct json_lexer* jl) {
 					if(sentinel == RESUME_ARRAY) {
 						reduce_array(jp);
 						
-						consume_commas(jp);
+//						consume_commas(jp);
 						next();
 						goto PARSE_ARRAY;
 					}
 					else if(sentinel == RESUME_OBJ) {
 						reduce_object(jp);
 						
-						consume_commas(jp);
+//						consume_commas(jp);
 						next();
 						goto PARSE_OBJ;
+					}
+					else if(sentinel == ROOT_VALUE) {
+						// proper finish
+						goto END;
 					}
 					else {
 						goto INVALID_SENTINEL;
 					}
 				}
-				consume_commas(jp);
-				next();
+//				consume_commas(jp);
+//				next();
 				break;
 			
 			case TOKEN_OBJ_START: dbg_parser_indent();dbg_printf("PARSE_OBJ\n");
@@ -1526,10 +1480,10 @@ static struct json_parser* parse_token_stream(struct json_lexer* jl) {
 			case TOKEN_NUMBER:
 			case TOKEN_NULL:
 			case TOKEN_UNDEFINED: dbg_parser_indent();dbg_printf("PARSE VALUE \n");
-				parser_push(jp, tok->val);
+				parser_push(jp, jp->cur_tok.val);
 				reduce_array(jp);
 				
-				consume_commas(jp);
+//				consume_commas(jp);
 				next();
 				
 				goto PARSE_ARRAY;
@@ -1537,9 +1491,12 @@ static struct json_parser* parse_token_stream(struct json_lexer* jl) {
 			case TOKEN_OBJ_END: dbg_parser_indent();dbg_printf("BRACKET_MISMATCH\n");
 				goto BRACKET_MISMATCH;
 			
+			case TOKEN_COMMA:
+				next();
+				goto PARSE_ARRAY;
+			
 			case TOKEN_NONE:
 			case TOKEN_LABEL:
-			case TOKEN_COMMA:
 			case TOKEN_COLON: 
 			default: dbg_printf("UNEXPECTED_TOKEN\n");
 				// invalid
@@ -1549,10 +1506,11 @@ static struct json_parser* parse_token_stream(struct json_lexer* jl) {
 		return NULL;
 	
 	PARSE_OBJ:
-		dbg_parser_indent();dbg_printf("\nparse_obj\n");
+		dbg_parser_indent();dbg_printf("\nparse_obj l:%d, c:%d \n", jp->line_num, jp->char_num);
 	// cycle: label, colon, val, comma
+		consume_commas(jp);
 	
-		if(tok->tokenType == TOKEN_OBJ_END) {
+		if(jp->cur_tok.tokenType == TOKEN_OBJ_END) {
 			dbg_parser_indent();dbg_printf("obj- TOKEN_OBJ_END\n");
 			parser_indent_level--;
 			/* what the stack should look like now
@@ -1572,16 +1530,20 @@ static struct json_parser* parse_token_stream(struct json_lexer* jl) {
 				if(sentinel == RESUME_ARRAY) {
 					reduce_array(jp);
 					
-					consume_commas(jp);
 					next();
+					consume_commas(jp);
 					goto PARSE_ARRAY;
 				}
 				else if(sentinel == RESUME_OBJ) {
 					reduce_object(jp);
 					
-					consume_commas(jp);
 					next();
+					consume_commas(jp);
 					goto PARSE_OBJ;
+				}
+				else if(sentinel == ROOT_VALUE) {
+					// proper finish
+					goto END;
 				}
 				else {
 					goto INVALID_SENTINEL;
@@ -1591,16 +1553,29 @@ static struct json_parser* parse_token_stream(struct json_lexer* jl) {
 			dbg_printf("ending obj in begining of obj\n");
 			goto UNEXPECTED_TOKEN;
 		}
-		else if(tok->tokenType != TOKEN_LABEL && tok->tokenType != TOKEN_STRING) {
-			// error
-			dbg_printf("!!!missing label\n");
-			goto UNEXPECTED_TOKEN;
+		
+		
+		switch(jp->cur_tok.tokenType) {
+			case TOKEN_LABEL:
+			case TOKEN_STRING:
+			case TOKEN_TRUE:
+			case TOKEN_FALSE:
+			case TOKEN_INFINITY:
+			case TOKEN_NULL:
+			case TOKEN_UNDEFINED:
+			case TOKEN_NAN:
+				parser_push(jp, jp->cur_tok.val);
+				break;
+			
+			default:
+				// error
+				dbg_printf("!!!missing label\n");
+				goto UNEXPECTED_TOKEN;
 		}
-		parser_push(jp, tok->val);
 		dbg_dump_stack(jp, 5);
 		next();
 		
-		if(tok->tokenType != TOKEN_COLON) {
+		if(jp->cur_tok.tokenType != TOKEN_COLON) {
 			// error
 			dbg_printf("!!!missing colon\n");
 			goto UNEXPECTED_TOKEN;
@@ -1608,7 +1583,7 @@ static struct json_parser* parse_token_stream(struct json_lexer* jl) {
 		next();
 
 	
-		switch(tok->tokenType) {
+		switch(jp->cur_tok.tokenType) {
 		
 			case TOKEN_ARRAY_START: dbg_parser_indent();dbg_printf("obj- TOKEN_ARRAY_START\n");
 				parser_indent_level++;
@@ -1634,20 +1609,23 @@ static struct json_parser* parse_token_stream(struct json_lexer* jl) {
 			case TOKEN_NUMBER:
 			case TOKEN_NULL:
 			case TOKEN_UNDEFINED: dbg_parser_indent();dbg_printf("obj- TOKEN VALUE\n");
-				parser_push(jp, tok->val);
+				parser_push(jp, jp->cur_tok.val);
 				reduce_object(jp);
 				
-				consume_commas(jp);
 				next();
+				consume_commas(jp);
 				
 				goto PARSE_OBJ;
 		
 			case TOKEN_ARRAY_END: dbg_parser_indent();dbg_printf("obj- BRACE_MISMATCH\n");
 				goto BRACE_MISMATCH;
-			
+
+			case TOKEN_COMMA: dbg_parser_indent();dbg_printf("obj- eating comma\n");
+				next();
+				goto PARSE_OBJ;
+							
 			case TOKEN_NONE:
 			case TOKEN_LABEL:
-			case TOKEN_COMMA:
 			case TOKEN_COLON:
 			default: dbg_printf("obj- UNEXPECTED_TOKEN\n");
 				// invalid
@@ -1657,6 +1635,7 @@ static struct json_parser* parse_token_stream(struct json_lexer* jl) {
 	dbg_parser_indent();dbg_printf("end of obj\n");
 
 	return NULL;
+	
 CHECK_END:  dbg_parser_indent();dbg_printf("!!! CHECK_END\n");
 	if(jp->stack_cnt == 2) {
 		// check root value sentinel
@@ -1736,15 +1715,13 @@ struct json_file* json_parse_string(char* source, size_t len) {
 	jf = calloc(1, sizeof(*jf));
 	if(!jf) return NULL;
 	
-	jl = tokenize_string(source, len);
-	
-	if(!jl) return NULL;
-	
-	jp = parse_token_stream(jl);
+	jp = parse_token_stream(source, len);
 	if(!jp) {
 		printf("JSON: failed to parse token stream\n");
 		return NULL;
 	}
+	
+	free(jp);
 
 	jf->root = jp->stack[1];
 	//json_dump_value(*jp->stack, 0, 10);
@@ -1753,14 +1730,14 @@ struct json_file* json_parse_string(char* source, size_t len) {
 }
 
 
-static void free_array(struct json_array* arr) {
+static void free_array(struct json_value* arr) {
 	
-	struct json_array_node* n, *p;
+	struct json_link* n, *p;
 	
-	n = arr->head;
+	n = arr->arr.head;
 	while(n) {
 		
-		json_free(n->value);
+		json_free(n->v);
 		
 		p = n;
 		n = n->next;
@@ -1772,21 +1749,21 @@ static void free_array(struct json_array* arr) {
 }
 
 
-static void free_obj(struct json_obj* o) {
+static void free_obj(struct json_value* o) {
 	size_t freed = 0;
 	size_t i;
 	
-	for(i = 0; i < o->alloc_size && freed < o->fill; i++) {
+	for(i = 0; i < o->obj.alloc_size && freed < o->len; i++) {
 		struct json_obj_field* b;
 		
-		b = &o->buckets[i];
+		b = &o->obj.buckets[i];
 		if(b->key == NULL) continue;
 		
 		json_free(b->value);
 		freed++;
 	}
 	
-	free(o->buckets);
+	free(o->obj.buckets);
 	free(o);
 }
 
@@ -1797,15 +1774,17 @@ void json_free(struct json_value* v) {
 	
 	switch(v->type) {
 		case JSON_TYPE_STRING:
-			free(v->v.str);
+		case JSON_TYPE_COMMENT_SINGLE:
+		case JSON_TYPE_COMMENT_MULTI:
+			free(v->s);
 			break;
 		
 		case JSON_TYPE_OBJ:
-			free_obj(v->v.obj);
+			free_obj(v);
 			break;
 			
 		case JSON_TYPE_ARRAY:
-			free_array(v->v.arr);
+			free_array(v);
 			break;
 	}
 }
@@ -1828,16 +1807,16 @@ static void dbg_print_token(struct token* ts) {
 		tcl(TOKEN_ARRAY_END)
 		tcl(TOKEN_OBJ_START)
 		tcl(TOKEN_OBJ_END)
-		tc(TOKEN_STRING, "%s", ts->val->v.str)
-		tc(TOKEN_NUMBER, "%d", (int)ts->val->v.integer)
+		tc(TOKEN_STRING, "%s", ts->val->s)
+		tc(TOKEN_NUMBER, "%d", (int)ts->val->n)
 		tcl(TOKEN_NULL)
 		tcl(TOKEN_INFINITY)
 		tcl(TOKEN_UNDEFINED)
 		tcl(TOKEN_NAN)
-		tc(TOKEN_LABEL, "%s", ts->val->v.str)
+		tc(TOKEN_LABEL, "%s", ts->val->s)
 		tcl(TOKEN_COMMA)
 		tcl(TOKEN_COLON)
-		tc(TOKEN_COMMENT, "%s", ts->val->v.str)
+		tc(TOKEN_COMMENT, "%s", ts->val->s)
 	}
 }
 
@@ -1859,11 +1838,11 @@ static void dbg_print_value(struct json_value* v) {
 	switch(v->type) {
 		case JSON_TYPE_UNDEFINED: dbg_printf("undefined\n"); break;
 		case JSON_TYPE_NULL: dbg_printf("null\n"); break;
-		case JSON_TYPE_INT: dbg_printf("int: %d\n", (int)v->v.integer); break;
-		case JSON_TYPE_DOUBLE: dbg_printf("double %f\n", v->v.dbl); break;
-		case JSON_TYPE_STRING: dbg_printf("string: \"%s\"\n", v->v.str); break;
-		case JSON_TYPE_OBJ: dbg_printf("object [%d]\n", (int)v->v.obj->fill); break;
-		case JSON_TYPE_ARRAY: dbg_printf("array [%d]\n", (int)v->v.arr->length); break;
+		case JSON_TYPE_INT: dbg_printf("int: %d\n", (int)v->n); break;
+		case JSON_TYPE_DOUBLE: dbg_printf("double %f\n", v->d); break;
+		case JSON_TYPE_STRING: dbg_printf("string: \"%s\"\n", v->s); break;
+		case JSON_TYPE_OBJ: dbg_printf("object [%d]\n", (int)v->len); break;
+		case JSON_TYPE_ARRAY: dbg_printf("array [%d]\n", (int)v->len); break;
 		case JSON_TYPE_COMMENT_SINGLE: dbg_printf("comment, single\n"); break;
 		case JSON_TYPE_COMMENT_MULTI: dbg_printf("comment, multiline\n"); break;
 		default: 
@@ -1924,23 +1903,22 @@ struct json_value* json_deep_copy(struct json_value* v) {
 		default:
 		case JSON_TYPE_INT:
 		case JSON_TYPE_DOUBLE:
-			c->v.integer = v->v.integer;
-			c->info.base = v->info.base;
+			c->n = v->n;
+			c->base = v->base;
 			break;
 
 		case JSON_TYPE_ARRAY:
-			c->v.arr = malloc(sizeof(*c->v.arr));
-			v->v.arr->length = v->v.arr->length;
+			c->len = v->len;
 
-			if(v->v.arr->length == 0) {
-				c->v.arr->head = NULL;
-				c->v.arr->tail = NULL;
+			if(v->len == 0) {
+				c->arr.head = NULL;
+				c->arr.tail = NULL;
 			}
 			else {
-				struct json_array_node* cl, *cl_last, *vl;
+				struct json_link* cl, *cl_last, *vl;
 				
 				cl_last = NULL;
-				vl = v->v.arr->head;
+				vl = v->arr.head;
 				
 				while(vl) {
 					cl = malloc(sizeof(*cl));
@@ -1950,33 +1928,32 @@ struct json_value* json_deep_copy(struct json_value* v) {
 						cl_last->next = cl;
 					}
 					else {
-						c->v.arr->head = cl;
+						c->arr.head = cl;
 					}
 
-					cl->value = json_deep_copy(vl->value);
+					cl->v = json_deep_copy(vl->v);
 					
 					cl_last = cl;
 					vl = vl->next;
 				}
 				
 				cl->next = NULL;
-				c->v.arr->tail = cl;
+				c->arr.tail = cl;
 			}
 
 			break;
 
 		case JSON_TYPE_OBJ:
-			c->v.obj = malloc(sizeof(*c->v.obj));
-			c->v.obj->alloc_size = v->v.obj->alloc_size;
-			c->v.obj->fill = v->v.obj->fill;
+			c->obj.alloc_size = v->obj.alloc_size;
+			c->len = v->len;
 
-			c->v.obj->buckets = calloc(1, sizeof(c->v.obj->buckets) * c->v.obj->alloc_size);
+			c->obj.buckets = calloc(1, sizeof(c->obj.buckets) * c->obj.alloc_size);
 
-			for(long i = 0, j = 0; j < v->v.obj->fill && i < v->v.obj->alloc_size; i++) {
-				if(v->v.obj->buckets[i].key) { 
-					c->v.obj->buckets[i].key = strdup(v->v.obj->buckets[i].key);	
-					c->v.obj->buckets[i].hash = v->v.obj->buckets[i].hash;
-					c->v.obj->buckets[i].value = json_deep_copy(v->v.obj->buckets[i].value);
+			for(long i = 0, j = 0; j < v->len && i < v->obj.alloc_size; i++) {
+				if(v->obj.buckets[i].key) { 
+					c->obj.buckets[i].key = strdup(v->obj.buckets[i].key);	
+					c->obj.buckets[i].hash = v->obj.buckets[i].hash;
+					c->obj.buckets[i].value = json_deep_copy(v->obj.buckets[i].value);
 					j++;
 				}
 			}
@@ -1995,11 +1972,11 @@ void json_merge(struct json_value* into, struct json_value* from) {
 	
 	// append two arrays
 	if(into->type == JSON_TYPE_ARRAY && from->type == JSON_TYPE_ARRAY) {
-		struct json_array_node* fl;
+		struct json_link* fl;
 
-		fl = from->v.arr->head;
+		fl = from->arr.head;
 		while(fl) {
-			json_array_push_tail(into, json_deep_copy(fl->value));
+			json_array_push_tail(into, json_deep_copy(fl->v));
 		}
 
 		return;
@@ -2010,10 +1987,10 @@ void json_merge(struct json_value* into, struct json_value* from) {
 		
 		// clean out into first
 		if(into->type == JSON_TYPE_ARRAY) {
-			free_array(into->v.arr);
+			free_array(into);
 		}
 		else if(into->type == JSON_TYPE_OBJ) {
-			free_obj(into->v.obj);
+			free_obj(into);
 		}
 
 		// deep-copy an array or obect from value
@@ -2052,7 +2029,7 @@ void json_merge(struct json_value* into, struct json_value* from) {
 
 
 
-void spaces(int depth, int w) { return;
+static void spaces(int depth, int w) {
 	int i;
 	for(i = 0; i < depth * w; i++) putchar(' ');
 }
@@ -2105,8 +2082,8 @@ void json_dump_value(struct json_value* root, int cur_depth, int max_depth) {
 // JSON output
 
 static void sb_cat_escaped(struct json_write_context* ctx, char* str);
-static void json_obj_to_string(struct json_write_context* sb, struct json_obj* obj);
-static void json_arr_to_string(struct json_write_context* sb, struct json_array* arr);
+static void json_obj_to_string(struct json_write_context* sb, struct json_value* obj);
+static void json_arr_to_string(struct json_write_context* sb, struct json_value* arr);
 
 struct json_string_buffer* json_string_buffer_create(size_t initSize) {
 	struct json_string_buffer* b;
@@ -2177,7 +2154,7 @@ do { \
 	sb->line_len += _len; \
 } while(0);
 
-void json_value_to_string(struct json_write_context* ctx, struct json_value* v) {
+void json_stringify(struct json_write_context* ctx, struct json_value* v) {
 	struct json_string_buffer* sb = ctx->sb;
 	char* float_format = ctx->fmt.floatFormat ? ctx->fmt.floatFormat : "%f"; 
 	char qc;
@@ -2197,34 +2174,34 @@ void json_value_to_string(struct json_write_context* ctx, struct json_value* v) 
 			break;
 			
 		case JSON_TYPE_INT: // 2
-			sb_tail_catf(sb, "%ld", v->v.integer);
+			sb_tail_catf(sb, "%ld", v->n); // TODO: handle bases, formats
 			break;
 			
 		case JSON_TYPE_DOUBLE: 
-			sb_tail_catf(sb, float_format, v->v.dbl); // TODO: handle infinity, nan, etc
+			sb_tail_catf(sb, float_format, v->d); // TODO: handle infinity, nan, etc
 			break;
 			
 		case JSON_TYPE_STRING:
 			qc = ctx->fmt.useSingleQuotes ? '\'' : '"';
 			sb_putc(sb, qc);
-			sb_cat_escaped(ctx, v->v.str); 
+			sb_cat_escaped(ctx, v->s); 
 			sb_putc(sb, qc);
 			break;
 			
 		case JSON_TYPE_OBJ: 
-			json_obj_to_string(ctx, v->v.obj);
+			json_obj_to_string(ctx, v);
 			break;
 			
 		case JSON_TYPE_ARRAY: // 6
-			json_arr_to_string(ctx, v->v.arr);
+			json_arr_to_string(ctx, v);
 			break;
 			
 		case JSON_TYPE_COMMENT_SINGLE: // TODO: handle linebreaks in the comment string
-			sb_tail_catf(sb, "//%s\n", v->v.str);
+			sb_tail_catf(sb, "//%s\n", v->s);
 			break;
 			
 		case JSON_TYPE_COMMENT_MULTI: // TODO: clean "*/" out of the comment string
-			sb_tail_catf(sb, "/* %s */\n", v->v.str);
+			sb_tail_catf(sb, "/* %s */\n", v->s);
 			break;
 			
 		default: 
@@ -2275,11 +2252,11 @@ static void sb_cat_escaped(struct json_write_context* ctx, char* str) {
 }
 
 
-static void json_arr_to_string(struct json_write_context* ctx, struct json_array* arr) {
-	struct json_array_node* n;
+static void json_arr_to_string(struct json_write_context* ctx, struct json_value* arr) {
+	struct json_link* n;
 	struct json_string_buffer* sb = ctx->sb;
 	
-	int multiline = arr->length >= ctx->fmt.minArraySzExpand;
+	int multiline = arr->len >= ctx->fmt.minArraySzExpand;
 	
 	sb_putc(sb, '[');
 	
@@ -2287,12 +2264,12 @@ static void json_arr_to_string(struct json_write_context* ctx, struct json_array
 	
 	ctx->depth++;
 	
-	n = arr->head;
+	n = arr->arr.head;
 	while(n) {
 		
 		if(multiline) ctx_indent(ctx);
 		
-		json_value_to_string(ctx, n->value);
+		json_stringify(ctx, n->v);
 		
 		n = n->next;
 		
@@ -2323,12 +2300,12 @@ static int key_must_have_quotes(char* key) {
 }
 
 
-static void json_obj_to_string(struct json_write_context* ctx, struct json_obj* obj) {
+static void json_obj_to_string(struct json_write_context* ctx, struct json_value* obj) {
 	int i;
 	struct json_obj_field* f;
 	struct json_string_buffer* sb = ctx->sb;
 	
-	int multiline = obj->fill >= ctx->fmt.minObjSzExpand;
+	int multiline = obj->len >= ctx->fmt.minObjSzExpand;
 	int noquotes = ctx->fmt.noQuoteKeys;
 	char quoteChar = ctx->fmt.useSingleQuotes ? '\'' : '"';
 	
@@ -2338,9 +2315,9 @@ static void json_obj_to_string(struct json_write_context* ctx, struct json_obj* 
 	
 	ctx->depth++;
 	
-	int n = obj->fill;
-	for(i = 0; i < obj->alloc_size; i++) {
-		f = &obj->buckets[i];
+	int n = obj->len;
+	for(i = 0; i < obj->obj.alloc_size; i++) {
+		f = &obj->obj.buckets[i];
 		if(f->key == NULL) continue;
 		
 		if(multiline) ctx_indent(ctx);
@@ -2357,7 +2334,7 @@ static void json_obj_to_string(struct json_write_context* ctx, struct json_obj* 
 		sb_putc(sb, ':');
 		if(ctx->fmt.objColonSpace) sb_putc(sb, ' ');
 		
-		json_value_to_string(ctx, f->value);
+		json_stringify(ctx, f->value);
 		
 		if(n-- > 1) {
 			sb_putc(sb, ',');
@@ -2377,4 +2354,119 @@ static void json_obj_to_string(struct json_write_context* ctx, struct json_obj* 
 	if(multiline) ctx_indent(ctx);
 	sb_putc(sb, '}');
 }
+
+
+struct json_value* json_new_str(char* s) {
+	return json_new_strn(s, strlen(s));
+}
+
+struct json_value* json_new_strn(char* s, size_t len) {
+	struct json_value* v;
+	
+	v = malloc(sizeof(*v));
+	v->type = JSON_TYPE_STRING;
+	v->s = strndup(s, len);
+	v->len = len;
+	v->base = 0;
+	
+	return v;
+}
+
+struct json_value* json_new_double(double d) {
+	struct json_value* v;
+	
+	v = malloc(sizeof(*v));
+	v->type = JSON_TYPE_DOUBLE;
+	v->d = d;
+	v->len = 0;
+	v->base = 0;
+	
+	return v;
+}
+
+struct json_value* json_new_int(int64_t n) {
+	struct json_value* v;
+	
+	v = malloc(sizeof(*v));
+	v->type = JSON_TYPE_INT;
+	v->n = n;
+	v->len = 0;
+	v->base = 0;
+	
+	return v;
+}
+
+struct json_value* json_new_array() {
+	struct json_value* v;
+	
+	v = malloc(sizeof(*v));
+	v->type = JSON_TYPE_ARRAY;
+	v->arr.head = NULL;
+	v->arr.tail = NULL;
+	v->len = 0;
+	v->base = 0;
+	
+	return v;
+}
+
+struct json_value* json_new_object(size_t initial_alloc_size) {
+	
+	struct json_value* obj = malloc(sizeof(*obj));
+	
+	obj->type = JSON_TYPE_OBJ;
+	obj->len = 0;
+	obj->base = 0;
+	obj->obj.alloc_size = initial_alloc_size;
+	obj->obj.buckets = calloc(1, sizeof(*obj->obj.buckets) * obj->obj.alloc_size);
+	if(!obj->obj.buckets) {
+		free(obj);
+		return NULL;
+	}
+	
+	return obj;
+}
+
+struct json_value* json_new_null() {
+	struct json_value* v;
+	
+	v = malloc(sizeof(*v));
+	v->type = JSON_TYPE_NULL;
+	
+	return v;
+}
+
+struct json_value* json_new_undefined() {
+	struct json_value* v;
+	
+	v = malloc(sizeof(*v));
+	v->type = JSON_TYPE_UNDEFINED;
+	
+	return v;
+}
+
+struct json_value* json_new_true() {
+	struct json_value* v;
+	
+	v = malloc(sizeof(*v));
+	v->type = JSON_TYPE_BOOL;
+	v->n = 1; // true
+	v->len = 0;
+	v->base = 0;
+	
+	return v;
+}
+
+struct json_value* json_new_false() {
+	struct json_value* v;
+	
+	v = malloc(sizeof(*v));
+	v->type = JSON_TYPE_BOOL;
+	v->n = 0; // false
+	v->len = 0;
+	v->base = 0;
+	
+	return v;
+}
+
+
 

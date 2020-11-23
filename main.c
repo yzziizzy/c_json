@@ -34,7 +34,7 @@ int main(int argc, char* argv[]) {
 	ctx.fmt = fmt;
 	ctx.depth = 0;
 	
-	json_value_to_string(&ctx, jf->root);
+	json_stringify(&ctx, jf->root);
 // 	json_value_to_string(&ctx, NULL);
 	
 	
