@@ -193,6 +193,8 @@ char* json_obj_get_string(struct json_value* obj, char* key);
 double json_obj_get_double(struct json_value* obj, char* key, double def);
 // returns an integer or the default value if it's not an integer
 int64_t json_obj_get_int(struct json_value* obj, char* key, int64_t def);
+// returns the json_value strut for a key, or null if it doesn't exist
+struct json_value* json_obj_get_val(struct json_value* obj, char* key);
 
 
 int json_obj_length(struct json_value* obj);

@@ -395,6 +395,17 @@ double json_obj_get_double(struct json_value* obj, char* key, double def) {
 }
 
 
+// returns the json_value strut for a key, or null if it doesn't exist
+struct json_value* json_obj_get_val(struct json_value* obj, char* key) {
+	json_value_t* val;
+	
+	if(json_obj_get_key(obj, key, &val)) {
+		return NULL;
+	}
+
+	return val;
+}
+
 
 // number of keys in an object
 // -1 on error
