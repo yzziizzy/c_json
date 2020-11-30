@@ -1408,7 +1408,12 @@ static struct json_parser* parse_token_stream(char* source, size_t len) {
 	
 	// get the first token
 	lex_next_token(jp);
-
+	if(jp->cur_tok.tokenType == TOKEN_OBJ_START) {
+		parser_push_new_object(jp);
+		next();
+		goto PARSE_OBJ;
+	}
+	
 	PARSE_ARRAY: // not actually starting with an array; this is just the type probing code
 		dbg_parser_indent();
 		dbg_printf("\nparse_array l:%d, c:%d \n", jp->line_num, jp->char_num);
@@ -1531,14 +1536,14 @@ static struct json_parser* parse_token_stream(char* source, size_t len) {
 					reduce_array(jp);
 					
 					next();
-					consume_commas(jp);
+//					consume_commas(jp);
 					goto PARSE_ARRAY;
 				}
 				else if(sentinel == RESUME_OBJ) {
 					reduce_object(jp);
 					
 					next();
-					consume_commas(jp);
+//					consume_commas(jp);
 					goto PARSE_OBJ;
 				}
 				else if(sentinel == ROOT_VALUE) {
