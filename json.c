@@ -217,7 +217,7 @@ size_t json_array_calc_length(struct json_value* a) {
 
 
 // uses a truncated 128bit murmur3 hash
-static uint64_t hash_key(char* key, size_t len) {
+static uint64_t hash_key(char* key, intptr_t len) {
 	uint64_t hash[2];
 	
 	// len is optional
@@ -265,7 +265,8 @@ static int64_t find_bucket(struct json_value* obj, uint64_t hash, char* key) {
 static int json_obj_resize(struct json_value* obj, int newSize) {
 	struct json_obj_field* old, *op;
 	size_t oldlen = obj->obj.alloc_size;
-	int64_t i, n, bi;
+	int64_t n, bi;
+	size_t i;
 	
 	old = op = obj->obj.buckets;
 	
@@ -1214,7 +1215,7 @@ static int lex_next_token(struct json_parser* jl) {
 }
 
 static int parser_indent_level = 0;
-static void dbg_parser_indent() { return;
+static void dbg_parser_indent(void) { return;
 	int i;
 	for(i = 0; i < parser_indent_level; i++) {
 		dbg_printf("    ");
@@ -1954,7 +1955,7 @@ struct json_value* json_deep_copy(struct json_value* v) {
 
 			c->obj.buckets = calloc(1, sizeof(c->obj.buckets) * c->obj.alloc_size);
 
-			for(long i = 0, j = 0; j < v->len && i < v->obj.alloc_size; i++) {
+			for(size_t i = 0, j = 0; j < v->len && i < v->obj.alloc_size; i++) {
 				if(v->obj.buckets[i].key) { 
 					c->obj.buckets[i].key = strdup(v->obj.buckets[i].key);	
 					c->obj.buckets[i].hash = v->obj.buckets[i].hash;
@@ -2261,7 +2262,7 @@ static void json_arr_to_string(struct json_write_context* ctx, struct json_value
 	struct json_link* n;
 	struct json_string_buffer* sb = ctx->sb;
 	
-	int multiline = arr->len >= ctx->fmt.minArraySzExpand;
+	int multiline = arr->len >= (size_t)ctx->fmt.minArraySzExpand;
 	
 	sb_putc(sb, '[');
 	
@@ -2306,11 +2307,11 @@ static int key_must_have_quotes(char* key) {
 
 
 static void json_obj_to_string(struct json_write_context* ctx, struct json_value* obj) {
-	int i;
+	size_t i;
 	struct json_obj_field* f;
 	struct json_string_buffer* sb = ctx->sb;
 	
-	int multiline = obj->len >= ctx->fmt.minObjSzExpand;
+	int multiline = obj->len >= (size_t)ctx->fmt.minObjSzExpand;
 	int noquotes = ctx->fmt.noQuoteKeys;
 	char quoteChar = ctx->fmt.useSingleQuotes ? '\'' : '"';
 	
@@ -2320,7 +2321,7 @@ static void json_obj_to_string(struct json_write_context* ctx, struct json_value
 	
 	ctx->depth++;
 	
-	int n = obj->len;
+	size_t n = obj->len;
 	for(i = 0; i < obj->obj.alloc_size; i++) {
 		f = &obj->obj.buckets[i];
 		if(f->key == NULL) continue;

@@ -241,12 +241,12 @@ struct json_value* json_new_str(char* s);
 struct json_value* json_new_strn(char* s, size_t len);
 struct json_value* json_new_double(double d);
 struct json_value* json_new_int(int64_t n);
-struct json_value* json_new_array();
+struct json_value* json_new_array(void);
 struct json_value* json_new_object(size_t initial_alloc_size);
-struct json_value* json_new_null();
-struct json_value* json_new_undefined();
-struct json_value* json_new_true();
-struct json_value* json_new_false();
+struct json_value* json_new_null(void);
+struct json_value* json_new_undefined(void);
+struct json_value* json_new_true(void);
+struct json_value* json_new_false(void);
 
 
 
