@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdarg.h>
 #include <ctype.h>
+#include <limits.h>
 
 #include "json.h"
 #include "MurmurHash3.h"
@@ -130,12 +131,12 @@ struct json_value* json_array_pop_tail(struct json_value* a) {
 		t = a->arr.tail;
 		a->arr.tail = a->arr.tail->prev;
 		a->arr.tail->next = NULL;
+		
+		free(t);
 	}
 	else {
 		a->arr.head = a->arr.tail = NULL;
 	}
-	
-	free(t);
 	
 	return v;
 }
@@ -183,12 +184,12 @@ struct json_value* json_array_pop_head(struct json_value* a) {
 		t = a->arr.head;
 		a->arr.head = a->arr.head->prev;
 		a->arr.head->next = NULL;
+	
+		free(t);
 	}
 	else {
 		a->arr.tail = a->arr.head = NULL;
 	}
-	
-	free(t);
 	
 	return v;
 }
@@ -739,21 +740,18 @@ float json_as_float(struct json_value* v) {
 
 
 
-
 // out must be big enough, at least as big as in+1 just to be safe
 // appends a null to out, but is also null-safe
 static int decode_c_escape_str(char* in, char* out, size_t len, size_t* outLen) {
 	size_t i, o;
+	
+	char tmp[7];
 	
 	for(i = 0, o = 0; i < len; i++, o++) {
 		if(*in == '\\') {
 			in++;
 			i++;
 			switch(*in) {
-				case '\'': *out = '\''; break; 
-				case '"': *out = '"'; break; 
-				case '`': *out = '`'; break; 
-				case '?': *out = '?'; break; 
 				case '0': *out = '\0'; break; 
 				case 'r': *out = '\r'; break; 
 				case 'n': *out = '\n'; break;
@@ -763,19 +761,120 @@ static int decode_c_escape_str(char* in, char* out, size_t len, size_t* outLen) 
 				case 'v': *out = '\v'; break;
 				case 't': *out = '\t'; break;
 				case 'x': 
-					// TODO: parse hex code
-					*out = '?';
+				
+					if(len < i + 1) {
+//						jp->error = JSON_PARSER_ERROR_UNEXPECTED_EOI;
+						printf("JSON: EOF in hex escape sequence\n");
+						return 1;
+					}
+					if(!isxdigit(in[1])) {
+						// malformed hex code. output an 'x' and keep going.
+						*out = 'x';
+						break;
+					}
+					
+					tmp[0] = in[1];	
+				
+				
+					if(len < i + 2) {
+//						jp->error = JSON_PARSER_ERROR_UNEXPECTED_EOI;
+						printf("JSON: EOF in hex escape sequence\n");
+						return 1;
+					}
+					if(!isxdigit(in[2])) {
+						// malformed hex code, but we have one digit
+						tmp[1] = 0;
+						
+						*out = strtol(tmp, NULL, 16);
+						in++; i++;
+						break;
+					}
+					else {
+						tmp[1] = in[2];
+						tmp[2] = 0;
+						
+						*out = strtol(tmp, NULL, 16);
+						in += 2; i += 2;
+					}					
 					break;
-				case 'U':
-					// TODO parse longer unicode
+	
 				case 'u': 
-					// TODO: parse unicode
-					*out = '?';
+					if(in[1] == '{') {
+						int n;
+						int32_t code;
+						char* s;
+						// seek forward to the closing '}'
+						for(n = 0, s = in + 2;; n++) {
+							if(i + 3 >= len) {
+								printf("JSON: EOF in unicode escape sequence\n");
+								return 2;
+							}
+							
+							if(s[0] == '}') break;
+							
+							if(n == INT_MAX) {
+								printf("JSON: malformed unicode escape sequence\n");
+								return 3;
+							}
+							
+							if(!isxdigit(s[0])) {
+								printf("JSON: invalid character inside unicode escape sequence\n");
+								break;
+							}
+							
+							s++;
+						}
+						
+						int nl = n > 6 ? 6 : n;
+					
+						if(n > 0) {
+							strncpy(tmp, s - nl, nl);
+							tmp[nl] = 0;
+							code = strtol(tmp, NULL, 16);
+						}
+						else {
+							code = 0;
+						}
+						
+						*out = code; // todo: utf8 conversion
+						in += n + 2; i += n + 2;
+					}
+					else {
+						int n;
+						int32_t code;
+						char* s;
+						// seek forward to the closing '}'
+						for(n = 0, s = in + 1; n < 4; n++) {
+							if(i + 2 >= len) {
+								printf("JSON: EOF in unicode escape sequence\n");
+								return 2;
+							}
+							
+							if(!isxdigit(s[0])) {
+								break;
+							}
+							
+							s++;
+						}
+					
+						if(n > 0) {
+							strncpy(tmp, in + 1, n);
+							tmp[n] = 0;
+							code = strtol(tmp, NULL, 16);
+						}
+						else {
+							code = 0;
+						}
+						
+						*out = code; // todo: utf8 conversion
+						in += n; i += n;
+					}
+					
 					break;
-				// TODO: parse octal
 					
 				default:
-					return 1;
+					// pass-through
+					*out = in[0];
 			}
 		}
 		else {
@@ -804,7 +903,7 @@ static int decode_c_escape_str(char* in, char* out, size_t len, size_t* outLen) 
 // move forward one char
 static void lex_next_char(struct json_parser* jl) {
 	if(jl->error) { 
-		printf("next char has error\n");
+		printf("JSON: next char has error\n");
 		return;
 	}
 	if(*jl->head == '\n') {
@@ -1107,6 +1206,7 @@ static int lex_comment_token(struct json_parser* jl) {
 		}
 	}
 	else {
+		printf("JSON: broken comment\n");
 		jl->error = JSON_LEX_ERROR_INVALID_CHAR;
 		return 1;
 	}
@@ -1193,6 +1293,10 @@ static int lex_next_token(struct json_parser* jl) {
 				if(isalpha(c) || c == '_' || c == '$') {
 					lex_label_token(jl);
 					break;
+				}
+				
+				if(c == 0) {
+					return 1; // end of file
 				}
 				
 				// lex error
@@ -1718,18 +1822,27 @@ struct json_file* json_parse_string(char* source, size_t len) {
 	struct json_parser* jp;
 	struct json_file* jf;
 	
-	jf = calloc(1, sizeof(*jf));
-	if(!jf) return NULL;
-	
 	jp = parse_token_stream(source, len);
 	if(!jp) {
-		printf("JSON: failed to parse token stream\n");
+		printf("JSON: failed to parse token stream \n");
 		return NULL;
 	}
 	
-	free(jp);
-
+	jf = calloc(1, sizeof(*jf));
+	if(!jf) return NULL;
+	
+	
+	if(jp->stack_cnt < 1) {
+		printf("JSON: failed to parse token stream (2)\n");	
+		
+		free(jp);
+	
+		return NULL;
+	}
 	jf->root = jp->stack[1];
+	
+	free(jp);
+	
 	//json_dump_value(*jp->stack, 0, 10);
 	//json_dump_value(jf->root, 0, 10);
 	return jf;
@@ -1921,7 +2034,8 @@ struct json_value* json_deep_copy(struct json_value* v) {
 				c->arr.tail = NULL;
 			}
 			else {
-				struct json_link* cl, *cl_last, *vl;
+				struct json_link* cl = NULL;
+				struct json_link* cl_last, *vl;
 				
 				cl_last = NULL;
 				vl = v->arr.head;
