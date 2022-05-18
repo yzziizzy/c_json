@@ -764,7 +764,7 @@ static int decode_c_escape_str(char* in, char* out, size_t len, size_t* outLen) 
 				
 					if(len < i + 1) {
 //						jp->error = JSON_PARSER_ERROR_UNEXPECTED_EOI;
-						printf("JSON: EOF in hex escape sequence\n");
+						//printf("JSON: EOF in hex escape sequence\n");
 						return 1;
 					}
 					if(!isxdigit(in[1])) {
@@ -778,7 +778,7 @@ static int decode_c_escape_str(char* in, char* out, size_t len, size_t* outLen) 
 				
 					if(len < i + 2) {
 //						jp->error = JSON_PARSER_ERROR_UNEXPECTED_EOI;
-						printf("JSON: EOF in hex escape sequence\n");
+						//printf("JSON: EOF in hex escape sequence\n");
 						return 1;
 					}
 					if(!isxdigit(in[2])) {
@@ -806,19 +806,19 @@ static int decode_c_escape_str(char* in, char* out, size_t len, size_t* outLen) 
 						// seek forward to the closing '}'
 						for(n = 0, s = in + 2;; n++) {
 							if(i + 3 >= len) {
-								printf("JSON: EOF in unicode escape sequence\n");
+								//printf("JSON: EOF in unicode escape sequence\n");
 								return 2;
 							}
 							
 							if(s[0] == '}') break;
 							
 							if(n == INT_MAX) {
-								printf("JSON: malformed unicode escape sequence\n");
+								//printf("JSON: malformed unicode escape sequence\n");
 								return 3;
 							}
 							
 							if(!isxdigit(s[0])) {
-								printf("JSON: invalid character inside unicode escape sequence\n");
+								//printf("JSON: invalid character inside unicode escape sequence\n");
 								break;
 							}
 							
@@ -846,7 +846,7 @@ static int decode_c_escape_str(char* in, char* out, size_t len, size_t* outLen) 
 						// seek forward to the closing '}'
 						for(n = 0, s = in + 1; n < 4; n++) {
 							if(i + 2 >= len) {
-								printf("JSON: EOF in unicode escape sequence\n");
+								//printf("JSON: EOF in unicode escape sequence\n");
 								return 2;
 							}
 							
@@ -903,7 +903,7 @@ static int decode_c_escape_str(char* in, char* out, size_t len, size_t* outLen) 
 // move forward one char
 static void lex_next_char(struct json_parser* jl) {
 	if(jl->error) { 
-		printf("JSON: next char has error\n");
+		//printf("JSON: next char has error\n");
 		return;
 	}
 	if(*jl->head == '\n') {
@@ -1206,7 +1206,7 @@ static int lex_comment_token(struct json_parser* jl) {
 		}
 	}
 	else {
-		printf("JSON: broken comment\n");
+		//printf("JSON: broken comment\n");
 		jl->error = JSON_LEX_ERROR_INVALID_CHAR;
 		return 1;
 	}
@@ -1465,7 +1465,7 @@ static void reduce_object(struct json_parser* jp) {
 	
 	// TODO: check label type
 	dbg_dump_stack(jp, 10);
-	if(obj->type != JSON_TYPE_OBJ) { printf("invalid obj\n");
+	if(obj->type != JSON_TYPE_OBJ) {// printf("invalid obj\n");
 		
 		
 		dbg_printf("0 type: %d \n", v->type);
@@ -1783,7 +1783,7 @@ struct json_file* json_load_path(char* path) {
 	
 	f = fopen(path, "rb");
 	if(!f) {
-		fprintf(stderr, "JSON: no such file: \"%s\"\n", path);
+		//fprintf(stderr, "JSON: no such file: \"%s\"\n", path);
 		return NULL;
 	}
 	
@@ -1824,7 +1824,7 @@ struct json_file* json_parse_string(char* source, size_t len) {
 	
 	jp = parse_token_stream(source, len);
 	if(!jp) {
-		printf("JSON: failed to parse token stream \n");
+		//printf("JSON: failed to parse token stream \n");
 		return NULL;
 	}
 	
@@ -1833,7 +1833,7 @@ struct json_file* json_parse_string(char* source, size_t len) {
 	
 	
 	if(jp->stack_cnt < 1) {
-		printf("JSON: failed to parse token stream (2)\n");	
+		//printf("JSON: failed to parse token stream (2)\n");	
 		
 		free(jp);
 	
@@ -2234,7 +2234,7 @@ static void sb_check(struct json_string_buffer* sb, size_t more) {
 			sb->alloc *= 2;
 		}
 		else {
-			fprintf(stderr, "c_json: Memory allocation failed\n");
+			//fprintf(stderr, "c_json: Memory allocation failed\n");
 		}
 	} 
 }
@@ -2280,7 +2280,7 @@ void json_stringify(struct json_write_context* ctx, struct json_value* v) {
 	char qc;
 	
 	if(!v) {
-		fprintf(stderr, "NULL value passed to %s()\n", __func__);
+		//fprintf(stderr, "NULL value passed to %s()\n", __func__);
 		return;
 	}
 	
@@ -2325,7 +2325,7 @@ void json_stringify(struct json_write_context* ctx, struct json_value* v) {
 			break;
 			
 		default: 
-			fprintf(stderr, "c_json: unknown type in json_value_to_string\n");
+			//fprintf(stderr, "c_json: unknown type in json_value_to_string\n");
 	}
 }
 
