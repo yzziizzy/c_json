@@ -2324,8 +2324,8 @@ void json_stringify(struct json_write_context* ctx, struct json_value* v) {
 			sb_tail_catf(sb, "/* %s */\n", v->s);
 			break;
 			
-		default: 
-			//fprintf(stderr, "c_json: unknown type in json_value_to_string\n");
+		// default:
+			// fprintf(stderr, "c_json: unknown type in json_value_to_string\n");
 	}
 }
 
