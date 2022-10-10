@@ -12,7 +12,7 @@
 #ifdef JSON_DEBUG
 	#define dbg_printf(args...) printf(args)
 #else
-	#define dbg_printf(args...) 
+	#define dbg_printf(args...) {}
 	//static void nothin(char* x, ...) {};
 	//efine dbg_printf nothin 
 #endif
@@ -75,6 +75,9 @@ JSON_TYPEDEF enum json_error {
 	JSON_PARSER_ERROR_CORRUPT_STACK,
 	JSON_PARSER_ERROR_STACK_EXHAUSTED,
 	JSON_PARSER_ERROR_UNEXPECTED_EOI,
+	JSON_PARSER_ERROR_UNEXPECTED_TOKEN,
+	JSON_PARSER_ERROR_BRACE_MISMATCH,
+	JSON_PARSER_ERROR_BRACKET_MISMATCH,
 	
 	JSON_ERROR_MAXVALUE
 } JSON_TD(json_error_e);
@@ -121,8 +124,8 @@ JSON_TYPEDEF struct json_file {
 	
 	enum json_error error;
 	char* error_str;
-	int err_line_num;
-	int err_char_num;
+	long error_line_num;
+	long error_char_num;
 	
 } JSON_TD(json_file_t);
 
@@ -262,5 +265,81 @@ struct json_string_buffer* json_string_buffer_create(size_t initSize);
 void json_string_buffer_free(struct json_string_buffer* sb);
 
 void json_stringify(struct json_write_context* ctx, struct json_value* v);
+
+
+
+
+/*
+Loop macro magic
+
+https://www.chiark.greenend.org.uk/~sgtatham/mp/
+
+json_value_t* obj;
+JSON_OBJ_EACH(&obj, key, val) {
+	printf("loop: %s, %s", key, val->s);
+}
+
+effective source:
+
+	#define JSON_OBJ_EACH(obj, keyname, valname)
+	if(0)
+		finished: ;
+	else
+		for(char* keyname;;) // internal declarations, multiple loops to avoid comma op funny business
+		for(valtype valname;;)
+		for(void* iter = NULL ;;)
+			if(json_obj_next(obj, iter, &keyname, &valname))
+				goto main_loop;
+			else
+				while(1)
+					if(1) {
+						// when the user uses break
+						goto finished;
+					}
+					else
+						while(1)
+							if(!json_obj_next(obj, iter, &keyname, &valname)) {
+								// normal termination
+								goto finished;
+							}
+							else
+								main_loop:
+								//	{ user block; not in macro }
+*/
+#define JSONHASH__PASTEINNER(a, b) a ## b
+#define JSONHASH__PASTE(a, b) JSONHASH__PASTEINNER(a, b) 
+#define JSONHASH__ITER(key, val) JSONHASH__PASTE(jsonhashtable_iter_ ## key ## __ ## val ## __, __LINE__)
+#define JSONHASH__FINISHED(key, val) JSONHASH__PASTE(jsonhashtable_finished__ ## key ## __ ## val ## __, __LINE__)
+#define JSONHASH__MAINLOOP(key, val) JSONHASH__PASTE(jsonhashtable_main_loop__ ## key ## __ ## val ## __, __LINE__)    
+#define JSON_OBJ_EACH(obj, keyname, valname) \
+if(0) \
+	JSONHASH__FINISHED(keyname, val): ; \
+else \
+	for(char* keyname ;;) \
+	for(struct json_value* valname ;;) \
+	for(void* JSONHASH__ITER(keyname, val) = NULL ;;) \
+		if(json_obj_next(obj, & (JSONHASH__ITER(keyname, val)), &keyname, &valname)) \
+			goto JSONHASH__MAINLOOP(keyname, val); \
+		else \
+			while(1) \
+				if(1) { \
+					goto JSONHASH__FINISHED(keyname, val); \
+				} \
+				else \
+					while(1) \
+						if(!json_obj_next(obj, & (JSONHASH__ITER(keyname, val)), &keyname, &valname)) { \
+							goto JSONHASH__FINISHED(keyname, val); \
+						} \
+						else \
+							JSONHASH__MAINLOOP(keyname, val) :
+							
+							//	{ user block; not in macro }
+
+
+
+
+
+
+
 
 #endif // JSON__JSON_H__INCLUDED

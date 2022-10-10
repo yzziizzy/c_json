@@ -50,6 +50,7 @@ struct token {
 
 struct json_parser {
 	int error;
+	char* err_str;
 
 	// lexing info
 	char* source;
@@ -1761,19 +1762,24 @@ CHECK_END:  dbg_parser_indent();dbg_printf("!!! CHECK_END\n");
 	}
 	//i = *((int*)0);
 END:  dbg_printf("!!! END\n");
-	if(jp->error) printf("parsing error: %d\n", jp->error);
+	if(jp->error) dbg_printf("parsing error: %d\n", jp->error);
 	return jp;
 UNEXPECTED_EOI: // end of input
 	dbg_printf("!!! UNEXPECTED_EOI\n");
-	return NULL;
+	jp->error = JSON_PARSER_ERROR_UNEXPECTED_EOI;
+	return jp;
 UNEXPECTED_TOKEN: dbg_printf("!!! UNEXPECTED_TOKEN\n");
-	return NULL;
+	jp->error = JSON_PARSER_ERROR_UNEXPECTED_TOKEN;
+	return jp;
 BRACE_MISMATCH: dbg_printf("!!! BRACE_MISMATCH\n");
-	return NULL;
+	jp->error = JSON_PARSER_ERROR_BRACE_MISMATCH;
+	return jp;
 BRACKET_MISMATCH: dbg_printf("!!! BRACKET_MISMATCH\n");
-	return NULL;
+	jp->error = JSON_PARSER_ERROR_BRACKET_MISMATCH;
+	return jp;
 INVALID_SENTINEL: dbg_printf("!!! INVALID_SENTINEL\n");
-	return NULL;
+	jp->error = JSON_PARSER_ERROR_CORRUPT_STACK;
+	return jp;
 }
 
 
@@ -1832,14 +1838,18 @@ struct json_file* json_parse_string(char* source, size_t len) {
 	if(!jf) return NULL;
 	
 	
-	if(jp->stack_cnt < 1) {
+	if(jp->stack_cnt == 1) {	
+		jf->root = jp->stack[1];
 		//printf("JSON: failed to parse token stream (2)\n");	
-		
-		free(jp);
-	
-		return NULL;
 	}
-	jf->root = jp->stack[1];
+	// else some sort of error. probably EOI
+	
+	jf->error = jp->error;
+	if(jf->error) {
+		jf->error_line_num = jp->line_num;
+		jf->error_char_num = jp->char_num;
+		jf->error_str = json_get_err_str(jf->error);
+	}
 	
 	free(jp);
 	
@@ -2002,12 +2012,15 @@ char* json_get_err_str(enum json_error e) {
 		case JSON_LEX_ERROR_NULL_IN_STRING: return "Null byte found in string";
 		case JSON_LEX_ERROR_NULL_BYTE: return "Null byte found in file";
 		case JSON_LEX_ERROR_INVALID_STRING: return "Invalid string";
-		case JSON_LEX_ERROR_UNEXPECTED_END_OF_INPUT: return "Unexpected end of input (lexer)";
+		case JSON_LEX_ERROR_UNEXPECTED_END_OF_INPUT: return "Unexpected end of input in lexer";
 		case JSON_LEX_ERROR_INVALID_CHAR: return "Invalid character code";
 		
 		case JSON_PARSER_ERROR_CORRUPT_STACK: return "Parser stack corrupted";
 		case JSON_PARSER_ERROR_STACK_EXHAUSTED: return "Parser stack prematurely exhausted";
-		case JSON_PARSER_ERROR_UNEXPECTED_EOI: return "Unexpected end of input (parser)";
+		case JSON_PARSER_ERROR_UNEXPECTED_EOI: return "Unexpected end of input";
+		case JSON_PARSER_ERROR_UNEXPECTED_TOKEN: return "Unexpected token";
+		case JSON_PARSER_ERROR_BRACE_MISMATCH: return "Brace mismatch";
+		case JSON_PARSER_ERROR_BRACKET_MISMATCH: return "Bracket mismatch";
 		default: return "Invalid Error Code";
 	}
 }
