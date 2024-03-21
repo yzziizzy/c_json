@@ -393,7 +393,7 @@ double json_obj_get_double(struct json_value* obj, char* key, double def) {
 }
 
 
-// returns the json_value strut for a key, or null if it doesn't exist
+// returns the json_value struct for a key, or null if it doesn't exist
 struct json_value* json_obj_get_val(struct json_value* obj, char* key) {
 	json_value_t* val;
 	
@@ -1518,6 +1518,10 @@ static struct json_parser* parse_token_stream(char* source, size_t len) {
 		parser_push_new_object(jp);
 		next();
 		goto PARSE_OBJ;
+	} else if(jp->cur_tok.tokenType == TOKEN_ARRAY_START) {
+		parser_push_new_array(jp);
+		next();
+		goto PARSE_ARRAY;
 	}
 	
 	PARSE_ARRAY: // not actually starting with an array; this is just the type probing code
@@ -1525,7 +1529,50 @@ static struct json_parser* parse_token_stream(char* source, size_t len) {
 		dbg_printf("\nparse_array l:%d, c:%d \n", jp->line_num, jp->char_num);
 		
 		
-		if(jp->eoi) goto CHECK_END;
+		// if(jp->eoi) goto CHECK_END;
+		if(jp->cur_tok.tokenType == TOKEN_ARRAY_END) {
+			dbg_parser_indent();dbg_printf("array- TOKEN_ARR_END\n");
+			parser_indent_level--;
+			/* what the stack should look like now
+				...
+				3 parent container 
+				2 ? possibly a label ?
+				1 -- resume sentinel --
+				0 array to be closed
+			*/
+			{
+				// TODO check stack depth
+				struct json_value* closed = parser_pop(jp);
+				struct json_value* sentinel = parser_pop(jp);
+				
+				// put the closed array back on the stack then reduce it appropriately
+				parser_push(jp, closed);
+				if(sentinel == RESUME_ARRAY) {
+					reduce_array(jp);
+					
+					next();
+//					consume_commas(jp);
+					goto PARSE_ARRAY;
+				}
+				else if(sentinel == RESUME_OBJ) {
+					reduce_object(jp);
+					
+					next();
+//					consume_commas(jp);
+					goto PARSE_OBJ;
+				}
+				else if(sentinel == ROOT_VALUE) {
+					// proper finish
+					goto END;
+				}
+				else {
+					goto INVALID_SENTINEL;
+				}
+			}
+			
+			dbg_printf("ending array in begining of array\n");
+			goto UNEXPECTED_TOKEN;
+		}
 	
 		// cycle: val, comma
 		switch(jp->cur_tok.tokenType) {
