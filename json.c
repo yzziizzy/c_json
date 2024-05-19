@@ -929,6 +929,8 @@ static int lex_push_token_val(struct json_parser* jp, enum token_type t, struct 
 	jp->cur_tok.tokenType = t;
 	jp->cur_tok.val = val;
 	
+	dbg_printf("pushing token %d at %d, %d\n", t, jp->line_num, jp->char_num);
+	
 	return 0;
 }
 
@@ -954,6 +956,7 @@ static int lex_string_token(struct json_parser* jl) {
 	// find len, count lines
 	while(1) {
 		
+		
 		if(*se == delim && *(se-1) != '\\') break;
 		if(*se == '\0') {
 			jl->error = JSON_LEX_ERROR_NULL_IN_STRING;
@@ -964,6 +967,7 @@ static int lex_string_token(struct json_parser* jl) {
 			lines++;
 			char_num = 1;
 		}
+		
 		char_num++;
 		se++;
 	//	printf("%d.%d\n", jl->line_num + lines, char_num);
@@ -991,7 +995,7 @@ static int lex_string_token(struct json_parser* jl) {
 	
 	// advance to the end of the string
 	jl->head = se;
-	jl->char_num = char_num;
+	jl->char_num = char_num + 1;
 	jl->line_num += lines;
 	
 	
@@ -1081,28 +1085,40 @@ static int lex_label_token(struct json_parser* jl) {
 	if(0 == strncasecmp(se, "true", strlen("true"))) {
 		if(!isalnum(se[strlen("true")]) && se[strlen("true")] != '_') {
 			lex_push_token_val(jl, TOKEN_TRUE, json_new_strn(se, strlen("true")));
-			jl->head += strlen("true");
+			jl->head += strlen("true") - 1;
+			jl->char_num += strlen("true") - 1;
 			return 0;
 		}
 	}
 	if(0 == strncasecmp(se, "false", strlen("false"))) {
-		if(!isalnum(se[strlen("false")]) && se[strlen("true")] != '_') {
+		if(!isalnum(se[strlen("false")]) && se[strlen("false")] != '_') {
 			lex_push_token_val(jl, TOKEN_FALSE, json_new_strn(se, strlen("false")));
-			jl->head += strlen("false");
+			jl->head += strlen("false") - 1;
+			jl->char_num += strlen("false") - 1;
 			return 0;
 		}
 	}
 	if(0 == strncasecmp(se, "null", strlen("null"))) {
 		if(!isalnum(se[strlen("null")]) && se[strlen("null")] != '_') {
-			lex_push_token_val(jl, TOKEN_FALSE, json_new_strn(se, strlen("null")));
-			jl->head += strlen("null");
+			lex_push_token_val(jl, TOKEN_NULL, json_new_strn(se, strlen("null")));
+			jl->head += strlen("null") - 1;
+			jl->char_num += strlen("null") - 1;
 			return 0;
 		}
 	}
 	if(0 == strncasecmp(se, "undefined", strlen("undefined"))) {
 		if(!isalnum(se[strlen("undefined")]) && se[strlen("undefined")] != '_') {
-			lex_push_token_val(jl, TOKEN_FALSE, json_new_strn(se, strlen("undefined")));
-			jl->head += strlen("undefined");
+			lex_push_token_val(jl, TOKEN_UNDEFINED, json_new_strn(se, strlen("undefined")));
+			jl->head += strlen("undefined") - 1;
+			jl->char_num += strlen("undefined") - 1;
+			return 0;
+		}
+	}
+	if(0 == strncasecmp(se, "infinity", strlen("infinity"))) {
+		if(!isalnum(se[strlen("infinity")]) && se[strlen("infinity")] != '_') {
+			lex_push_token_val(jl, TOKEN_INFINITY, json_new_strn(se, strlen("infinity")));
+			jl->head += strlen("infinity") - 1;
+			jl->char_num += strlen("infinity") - 1;
 			return 0;
 		}
 	}
@@ -1531,7 +1547,7 @@ static struct json_parser* parse_token_stream(char* source, size_t len) {
 		
 		// if(jp->eoi) goto CHECK_END;
 		if(jp->cur_tok.tokenType == TOKEN_ARRAY_END) {
-			dbg_parser_indent();dbg_printf("array- TOKEN_ARR_END\n");
+			dbg_parser_indent();dbg_printf("array- TOKEN_ARR_END l:%d, c:%d \n", jp->line_num, jp->char_num);
 			parser_indent_level--;
 			/* what the stack should look like now
 				...
@@ -1577,14 +1593,14 @@ static struct json_parser* parse_token_stream(char* source, size_t len) {
 		// cycle: val, comma
 		switch(jp->cur_tok.tokenType) {
 		
-			case TOKEN_ARRAY_START: dbg_parser_indent();dbg_printf("TOKEN_ARRAY_START\n");
+			case TOKEN_ARRAY_START: dbg_parser_indent();dbg_printf("TOKEN_ARRAY_START l:%d, c:%d \n", jp->line_num, jp->char_num);
 				parser_indent_level++;
 				parser_push(jp, RESUME_ARRAY);
 				parser_push_new_array(jp);
 				next();
 				goto PARSE_ARRAY;
 				
-			case TOKEN_ARRAY_END: dbg_parser_indent();dbg_printf("TOKEN_ARRAY_END\n");
+			case TOKEN_ARRAY_END: dbg_parser_indent();dbg_printf("TOKEN_ARRAY_END l:%d, c:%d \n", jp->line_num, jp->char_num);
 			parser_indent_level--;
 				/* what the stack should look like now
 					...
@@ -1627,7 +1643,7 @@ static struct json_parser* parse_token_stream(char* source, size_t len) {
 //				next();
 				break;
 			
-			case TOKEN_OBJ_START: dbg_parser_indent();dbg_printf("PARSE_OBJ\n");
+			case TOKEN_OBJ_START: dbg_parser_indent();dbg_printf("PARSE_OBJ l:%d, c:%d \n", jp->line_num, jp->char_num);
 				parser_indent_level++;
 				parser_push(jp, RESUME_ARRAY);
 				parser_push_new_object(jp);
@@ -1637,7 +1653,7 @@ static struct json_parser* parse_token_stream(char* source, size_t len) {
 			case TOKEN_STRING:
 			case TOKEN_NUMBER:
 			case TOKEN_NULL:
-			case TOKEN_UNDEFINED: dbg_parser_indent();dbg_printf("PARSE VALUE \n");
+			case TOKEN_UNDEFINED: dbg_parser_indent();dbg_printf("PARSE VALUE l:%d, c:%d \n", jp->line_num, jp->char_num);
 				parser_push(jp, jp->cur_tok.val);
 				reduce_array(jp);
 				
@@ -1646,7 +1662,7 @@ static struct json_parser* parse_token_stream(char* source, size_t len) {
 				
 				goto PARSE_ARRAY;
 		
-			case TOKEN_OBJ_END: dbg_parser_indent();dbg_printf("BRACKET_MISMATCH\n");
+			case TOKEN_OBJ_END: dbg_parser_indent();dbg_printf("BRACKET_MISMATCH l:%d, c:%d \n", jp->line_num, jp->char_num);
 				goto BRACKET_MISMATCH;
 			
 			case TOKEN_COMMA:
@@ -1656,7 +1672,7 @@ static struct json_parser* parse_token_stream(char* source, size_t len) {
 			case TOKEN_NONE:
 			case TOKEN_LABEL:
 			case TOKEN_COLON: 
-			default: dbg_printf("UNEXPECTED_TOKEN\n");
+			default: dbg_printf("UNEXPECTED_TOKEN l:%d, c:%d \n", jp->line_num, jp->char_num);
 				// invalid
 				goto UNEXPECTED_TOKEN;
 		}
@@ -1669,7 +1685,7 @@ static struct json_parser* parse_token_stream(char* source, size_t len) {
 		consume_commas(jp);
 	
 		if(jp->cur_tok.tokenType == TOKEN_OBJ_END) {
-			dbg_parser_indent();dbg_printf("obj- TOKEN_OBJ_END\n");
+			dbg_parser_indent();dbg_printf("obj- TOKEN_OBJ_END l:%d, c:%d \n", jp->line_num, jp->char_num);
 			parser_indent_level--;
 			/* what the stack should look like now
 				...
@@ -1743,20 +1759,20 @@ static struct json_parser* parse_token_stream(char* source, size_t len) {
 	
 		switch(jp->cur_tok.tokenType) {
 		
-			case TOKEN_ARRAY_START: dbg_parser_indent();dbg_printf("obj- TOKEN_ARRAY_START\n");
+			case TOKEN_ARRAY_START: dbg_parser_indent();dbg_printf("obj- TOKEN_ARRAY_START l:%d, c:%d \n", jp->line_num, jp->char_num);
 				parser_indent_level++;
 				parser_push(jp, RESUME_OBJ);
 				parser_push_new_array(jp);
 				next();
 				goto PARSE_ARRAY;
 				
-			case TOKEN_OBJ_END: dbg_parser_indent();dbg_printf("obj- !!!TOKEN_OBJ_END in value slot\n");
+			case TOKEN_OBJ_END: dbg_parser_indent();dbg_printf("obj- !!!TOKEN_OBJ_END in value slot l:%d, c:%d \n", jp->line_num, jp->char_num);
 
 				
 				 dbg_printf("!!! escaped sentinel block\n");
 				break;
 			
-			case TOKEN_OBJ_START: dbg_parser_indent();dbg_printf("obj- TOKEN_OBJ_START\n");
+			case TOKEN_OBJ_START: dbg_parser_indent();dbg_printf("obj- TOKEN_OBJ_START l:%d, c:%d \n", jp->line_num, jp->char_num);
 				parser_indent_level++;
 				parser_push(jp, RESUME_OBJ);
 				parser_push_new_object(jp); // BUG
@@ -1765,8 +1781,11 @@ static struct json_parser* parse_token_stream(char* source, size_t len) {
 				
 			case TOKEN_STRING:
 			case TOKEN_NUMBER:
+			case TOKEN_TRUE:
+			case TOKEN_FALSE:
+			case TOKEN_INFINITY:
 			case TOKEN_NULL:
-			case TOKEN_UNDEFINED: dbg_parser_indent();dbg_printf("obj- TOKEN VALUE\n");
+			case TOKEN_UNDEFINED: dbg_parser_indent();dbg_printf("obj- TOKEN VALUE l:%d, c:%d \n", jp->line_num, jp->char_num);
 				parser_push(jp, jp->cur_tok.val);
 				reduce_object(jp);
 				
@@ -1775,17 +1794,17 @@ static struct json_parser* parse_token_stream(char* source, size_t len) {
 				
 				goto PARSE_OBJ;
 		
-			case TOKEN_ARRAY_END: dbg_parser_indent();dbg_printf("obj- BRACE_MISMATCH\n");
+			case TOKEN_ARRAY_END: dbg_parser_indent();dbg_printf("obj- BRACE_MISMATCH l:%d, c:%d \n", jp->line_num, jp->char_num);
 				goto BRACE_MISMATCH;
 
-			case TOKEN_COMMA: dbg_parser_indent();dbg_printf("obj- eating comma\n");
+			case TOKEN_COMMA: dbg_parser_indent();dbg_printf("obj- eating comma l:%d, c:%d \n", jp->line_num, jp->char_num);
 				next();
 				goto PARSE_OBJ;
 							
 			case TOKEN_NONE:
 			case TOKEN_LABEL:
 			case TOKEN_COLON:
-			default: dbg_printf("obj- UNEXPECTED_TOKEN\n");
+			default: dbg_printf("obj- UNEXPECTED_TOKEN l:%d, c:%d \n", jp->line_num, jp->char_num);
 				// invalid
 				goto UNEXPECTED_TOKEN;
 		}
@@ -1794,7 +1813,7 @@ static struct json_parser* parse_token_stream(char* source, size_t len) {
 
 	return NULL;
 	
-CHECK_END:  dbg_parser_indent();dbg_printf("!!! CHECK_END\n");
+CHECK_END:  dbg_parser_indent();dbg_printf("!!! CHECK_END l:%d, c:%d \n", jp->line_num, jp->char_num);
 	if(jp->stack_cnt == 2) {
 		// check root value sentinel
 		// good, fall through to END
@@ -1808,23 +1827,23 @@ CHECK_END:  dbg_parser_indent();dbg_printf("!!! CHECK_END\n");
 		goto UNEXPECTED_EOI;
 	}
 	//i = *((int*)0);
-END:  dbg_printf("!!! END\n");
+END:  dbg_printf("!!! END l:%d, c:%d \n", jp->line_num, jp->char_num);
 	if(jp->error) dbg_printf("parsing error: %d\n", jp->error);
 	return jp;
 UNEXPECTED_EOI: // end of input
-	dbg_printf("!!! UNEXPECTED_EOI\n");
+	dbg_printf("!!! UNEXPECTED_EOI l:%d, c:%d \n", jp->line_num, jp->char_num);
 	jp->error = JSON_PARSER_ERROR_UNEXPECTED_EOI;
 	return jp;
-UNEXPECTED_TOKEN: dbg_printf("!!! UNEXPECTED_TOKEN\n");
+UNEXPECTED_TOKEN: dbg_printf("!!! UNEXPECTED_TOKEN l:%d, c:%d \n", jp->line_num, jp->char_num);
 	jp->error = JSON_PARSER_ERROR_UNEXPECTED_TOKEN;
 	return jp;
-BRACE_MISMATCH: dbg_printf("!!! BRACE_MISMATCH\n");
+BRACE_MISMATCH: dbg_printf("!!! BRACE_MISMATCH l:%d, c:%d \n", jp->line_num, jp->char_num);
 	jp->error = JSON_PARSER_ERROR_BRACE_MISMATCH;
 	return jp;
-BRACKET_MISMATCH: dbg_printf("!!! BRACKET_MISMATCH\n");
+BRACKET_MISMATCH: dbg_printf("!!! BRACKET_MISMATCH l:%d, c:%d \n", jp->line_num, jp->char_num);
 	jp->error = JSON_PARSER_ERROR_BRACKET_MISMATCH;
 	return jp;
-INVALID_SENTINEL: dbg_printf("!!! INVALID_SENTINEL\n");
+INVALID_SENTINEL: dbg_printf("!!! INVALID_SENTINEL l:%d, c:%d \n", jp->line_num, jp->char_num);
 	jp->error = JSON_PARSER_ERROR_CORRUPT_STACK;
 	return jp;
 }
@@ -1973,7 +1992,7 @@ void json_file_free(struct json_file* jsf){
 }
 
 
-#define tc(x, y, z) case x: dbg_printf(#x ": " y "\n", z); break;
+#define tc(x, y, z) case x: dbg_printf(#x " foo: " y "\n", z); break;
 #define tcl(x) case x: dbg_printf(#x "\n"); break;
 
 static void dbg_print_token(struct token* ts) {
