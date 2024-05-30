@@ -71,6 +71,11 @@ struct json_parser {
 	int stack_alloc;
 };
 
+static void json_parser_free(struct json_parser* jp) {
+	if(jp->err_str) free(jp->err_str);
+//	if(jp->source) free(jp->source); // freed externally
+	if(jp->stack) free(jp->stack);
+}
 
 // sentinels for the parser stack
 
@@ -1496,7 +1501,7 @@ static void reduce_object(struct json_parser* jp) {
 	
 	// insert l:v into obj
 	json_obj_set_key(obj, l->s, v);
-	// BUG? free label value?
+	free(l);
 	
 	jp->stack_cnt -= 2;
 }
@@ -1917,6 +1922,7 @@ struct json_file* json_parse_string(char* source, size_t len) {
 		jf->error_str = json_get_err_str(jf->error);
 	}
 	
+	json_parser_free(jp);
 	free(jp);
 	
 	//json_dump_value(*jp->stack, 0, 10);
@@ -1954,7 +1960,9 @@ static void free_obj(struct json_value* o) {
 		b = &o->obj.buckets[i];
 		if(b->key == NULL) continue;
 		
+		free(b->key);
 		json_free(b->value);
+		free(b->value);
 		freed++;
 	}
 	
@@ -1987,7 +1995,9 @@ void json_free(struct json_value* v) {
 
 void json_file_free(struct json_file* jsf){
 	json_free(jsf->root);
-	if(jsf->lex_info) free(jsf->lex_info);
+	if(jsf->lex_info) {
+		free(jsf->lex_info);
+	}
 	free(jsf);
 }
 

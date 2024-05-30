@@ -14,7 +14,13 @@ int main(int argc, char* argv[]) {
 	int nr;
 	struct json_file* jf;
 	
-	jf = json_load_path("./test.json");//argv[1]);
+	jf = json_load_path("./test_simple.json");//argv[1]);
+	
+	
+	json_file_free(jf);
+	
+	return 0;
+	
 	
 	struct json_output_format fmt = {
 		.indentChar = ' ',
