@@ -323,6 +323,15 @@ int json_obj_get_key(struct json_value* obj, char* key, struct json_value** val)
 
 // zero for success
 int json_obj_set_key(struct json_value* obj, char* key, struct json_value* val) {
+	char* kd = strdup(key);
+	int res = json_obj_set_key_nodup(obj, kd, val);
+	
+	if(res) free(kd);
+	
+	return res;
+}
+
+int json_obj_set_key_nodup(struct json_value* obj, char* key, struct json_value* val) {
 	uint64_t hash;
 	int64_t bi;
 	
@@ -1500,7 +1509,7 @@ static void reduce_object(struct json_parser* jp) {
 	}
 	
 	// insert l:v into obj
-	json_obj_set_key(obj, l->s, v);
+	json_obj_set_key_nodup(obj, l->s, v);
 	free(l);
 	
 	jp->stack_cnt -= 2;
@@ -1945,8 +1954,6 @@ static void free_array(struct json_value* arr) {
 		
 		free(p);
 	}
-	
-	free(arr);
 }
 
 
@@ -1962,12 +1969,11 @@ static void free_obj(struct json_value* o) {
 		
 		free(b->key);
 		json_free(b->value);
-		free(b->value);
+		
 		freed++;
 	}
 	
 	free(o->obj.buckets);
-	free(o);
 }
 
 
@@ -1990,6 +1996,8 @@ void json_free(struct json_value* v) {
 			free_array(v);
 			break;
 	}
+	
+	free(v);
 }
 
 
@@ -2317,7 +2325,7 @@ static void sb_check(struct json_string_buffer* sb, size_t more) {
 	char* tmp;
 
 	if(sb->length + 1 + more > sb->alloc) {
-		tmp = realloc(sb->buf, sb->alloc * 2);
+		tmp = realloc(sb->buf, sb->alloc * 2); // BUG: guarantee sufficient size 
 		if(tmp) {
 			sb->buf = tmp;
 			sb->alloc *= 2;
@@ -2334,7 +2342,8 @@ static void sb_cat(struct json_string_buffer* sb, char* str) {
 	// TODO: optimize
 	size_t len = strlen(str);
 	sb_check(sb, len);
-	strcat(sb->buf, str);
+	memcpy(sb->buf + sb->length, str, len);
+//	strcat(sb->buf, str);
 	sb->length += len;
 	sb->line_len += len; 
 }
@@ -2342,12 +2351,11 @@ static void sb_cat(struct json_string_buffer* sb, char* str) {
 // checks size and concatenates a single char
 static void sb_putc(struct json_string_buffer* sb, int c) {
 	// TODO: optimize
-	
 	sb_check(sb, 1);
 	sb->buf[sb->length] = c;
-	sb->buf[sb->length + 1] = 0;
+//	sb->buf[sb->length + 1] = 0;
 	sb->length++;
-	sb->line_len = c == '\n' ? 0 : sb->line_len + 1; 
+	sb->line_len = (c == '\n') ? 0 : (sb->line_len + 1); 
 }
 
 static char* sb_tail_check(struct json_string_buffer* sb, int more) {
@@ -2357,8 +2365,8 @@ static char* sb_tail_check(struct json_string_buffer* sb, int more) {
 
 #define sb_tail_catf(sb, fmt, ...) \
 do { \
-	size_t _len = snprintf(NULL, 0, fmt, ##__VA_ARGS__); \
-	sprintf(sb_tail_check(sb, _len), fmt, ##__VA_ARGS__); \
+	size_t _len = snprintf(NULL, 0, fmt, __VA_ARGS__); \
+	snprintf(sb_tail_check(sb, _len), _len + 1, fmt, __VA_ARGS__); \
 	sb->length += _len; \
 	sb->line_len += _len; \
 } while(0);
@@ -2540,8 +2548,10 @@ static void json_obj_to_string(struct json_write_context* ctx, struct json_value
 		}
 		else sb_cat(sb, f->key);
 		
+		
 		sb_putc(sb, ':');
 		if(ctx->fmt.objColonSpace) sb_putc(sb, ' ');
+		
 		
 		json_stringify(ctx, f->value);
 		

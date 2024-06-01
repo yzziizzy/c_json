@@ -201,6 +201,7 @@ size_t json_array_calc_length(struct json_value* arr);
 
 int json_obj_get_key(struct json_value* obj, char* key, struct json_value** val);
 int json_obj_set_key(struct json_value* obj, char* key, struct json_value* val);
+int json_obj_set_key_nodup(struct json_value* obj, char* key, struct json_value* val); // takes ownership of key's memory
 
 // will probably be changed or removed later
 // coerces and strdup's the result
