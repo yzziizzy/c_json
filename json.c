@@ -1327,10 +1327,13 @@ static int lex_next_token(struct json_parser* jl) {
 				}
 				
 				if(c == 0) {
+					lex_push_token(jl, TOKEN_NONE);
 					return 1; // end of file
 				}
 				
 				// lex error
+				//printf("Lexed invalid char: '%c'\n", c);
+				lex_push_token(jl, TOKEN_NONE);
 				jl->error = JSON_LEX_ERROR_INVALID_CHAR;
 				return 1;
 		}
