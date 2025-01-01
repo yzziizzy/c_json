@@ -1332,7 +1332,7 @@ static int lex_next_token(struct json_parser* jl) {
 				}
 				
 				// lex error
-				//printf("Lexed invalid char: '%c'\n", c);
+//				printf("Lexed invalid char: '%c'\n", c);
 				lex_push_token(jl, TOKEN_NONE);
 				jl->error = JSON_LEX_ERROR_INVALID_CHAR;
 				return 1;
@@ -1866,6 +1866,8 @@ INVALID_SENTINEL: dbg_printf("!!! INVALID_SENTINEL l:%d, c:%d \n", jp->line_num,
 }
 
 
+#ifndef JSON_NO_STDIO
+
 struct json_file* json_load_path(char* path) {
 	struct json_file* jf;
 	FILE* f;
@@ -1905,6 +1907,7 @@ struct json_file* json_read_file(FILE* f) {
 	
 	return jf;
 }
+#endif
 
 struct json_file* json_parse_string(char* source, size_t len) {
 	struct json_lexer* jl;
@@ -2251,7 +2254,7 @@ void json_merge(struct json_value* into, struct json_value* from) {
 
 static void spaces(int depth, int w) {
 	int i;
-	for(i = 0; i < depth * w; i++) putchar(' ');
+	for(i = 0; i < depth * w; i++) dbg_printf(" ");
 }
 
 // shitty recursive fn for debugging

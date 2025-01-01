@@ -3,7 +3,7 @@
 
 
 #include <stddef.h>
-#include <stdio.h>
+//#include <stdio.h>
 #include <stdarg.h>
 #include <stdint.h>
 
@@ -233,8 +233,11 @@ int json_obj_next(struct json_value* val, void** iter, char** key, struct json_v
 struct json_value* json_deep_copy(struct json_value* v);
 void json_merge(struct json_value* into, struct json_value* from); 
 
+#ifndef JSON_NO_STDIO
 struct json_file* json_load_path(char* path);
 struct json_file* json_read_file(FILE* f);
+#endif 
+
 struct json_file* json_parse_string(char* source, size_t len);
 
 // recursive.
